@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 48 13% 7%;
+  --foreground: 42 100% 91%;
+  --card: 48 16% 10%;
+  --card-foreground: 42 100% 91%;
+  --popover: 48 16% 10%;
+  --popover-foreground: 42 100% 91%;
+  --primary: 37 100% 65%;
+  --primary-foreground: 48 17% 7%;
+  --secondary: 148 100% 73%;
+  --secondary-foreground: 48 17% 7%;
+  --muted: 45 17% 16%;
+  --muted-foreground: 43 34% 70%;
+  --accent: 347 100% 69%;
+  --accent-foreground: 48 17% 7%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 42 100% 91%;
+  --border: 41 31% 27%;
+  --input: 41 31% 27%;
+  --ring: 148 100% 73%;
+  --radius: 0.35rem;
+  --font-pixel: "Courier New";
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 14% 14%, rgba(255, 184, 77, 0.11), transparent 26rem),
+    radial-gradient(circle at 90% 20%, rgba(255, 95, 126, 0.09), transparent 24rem),
+    linear-gradient(135deg, #090908 0%, #15140f 42%, #0c1410 100%);
+  color: hsl(var(--foreground));
+  font-family: var(--font-body);
+}
+
+body::before {
+  pointer-events: none;
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 50%, rgba(0, 0, 0, 0.08) 50%),
+    linear-gradient(90deg, rgba(255, 0, 0, 0.025), rgba(0, 255, 79, 0.02), rgba(0, 128, 255, 0.025));
+  background-size: 100% 4px, 6px 100%;
+  mix-blend-mode: screen;
+  opacity: 0.42;
+}
+
+body::after {
+  pointer-events: none;
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 41;
+  background: linear-gradient(180deg, transparent, rgba(255, 242, 207, 0.06), transparent);
+  opacity: 0.2;
+  animation: scan 3s linear infinite alternate;
+}
+
+::selection {
+  background: #77ff79;
+  color: #10100e;
+}
+
+.pixel-border {
+  border: 2px solid hsl(var(--border));
+  box-shadow: 6px 6px 0 #050505, inset 0 0 0 2px rgba(255, 242, 207, 0.08);
+}
+
+.pixel-border-sm {
+  border: 2px solid hsl(var(--border));
+  box-shadow: 3px 3px 0 #050505;
+}
+
+.console-grid {
+  background-image:
+    linear-gradient(rgba(255, 242, 207, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 242, 207, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.tactile {
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.tactile:hover {
+  transform: translate(-2px, -2px);
+  filter: brightness(1.06);
+}
+
+.tactile:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 #050505;
+}
