@@ -29,6 +29,8 @@ type BroadcastStatsRow = {
   source_type: FeedSourceType;
   source_name: string;
   storage_status: BroadcastStorageStatus;
+  tts_provider: string | null;
+  tts_model: string | null;
   created_at: string;
 };
 
@@ -130,7 +132,7 @@ async function loadStats() {
       .limit(1000),
     supabase
       .from("broadcasts")
-      .select("source_type,source_name,storage_status,created_at")
+      .select("source_type,source_name,storage_status,tts_provider,tts_model,created_at")
       .order("created_at", { ascending: false })
       .limit(1000),
   ]);
@@ -151,6 +153,8 @@ async function loadStats() {
   const sourceNameCounts = countBy(broadcasts.map((broadcast) => broadcast.source_name)).slice(0, 8);
   const errorCodeCounts = countBy(events.map((event) => event.error_code)).slice(0, 8);
   const storageStatusCounts = countBy(broadcasts.map((broadcast) => broadcast.storage_status));
+  const ttsProviderCounts = countBy(broadcasts.map((broadcast) => broadcast.tts_provider)).slice(0, 8);
+  const ttsModelCounts = countBy(broadcasts.map((broadcast) => broadcast.tts_model)).slice(0, 8);
   const shareClickCount = sumEvents(events, [
     "copy_link_clicked",
     "native_share_clicked",
@@ -169,6 +173,8 @@ async function loadStats() {
     errorCodeCounts,
     shareClickCount,
     storageStatusCounts,
+    ttsProviderCounts,
+    ttsModelCounts,
     recentEvents: events.slice(0, 25),
   };
 }
@@ -324,6 +330,8 @@ export default async function AdminStatsPage({ searchParams }: StatsPageProps) {
               <CountList label="Top source names" rows={stats.sourceNameCounts} empty="No sources yet." />
               <CountList label="Error codes" rows={stats.errorCodeCounts} empty="No errors tracked." />
               <CountList label="Storage status" rows={stats.storageStatusCounts} empty="No broadcasts yet." />
+              <CountList label="TTS providers" rows={stats.ttsProviderCounts} empty="No TTS metadata yet." />
+              <CountList label="TTS models" rows={stats.ttsModelCounts} empty="No TTS metadata yet." />
             </div>
 
             <div className="rounded-sm border-2 border-border bg-[#171610] p-4">

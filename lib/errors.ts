@@ -12,7 +12,7 @@ export type AppErrorCode =
   | "BROADCAST_SAVE_FAILED"
   | "UNKNOWN";
 
-export type AppErrorProvider = "openai" | "x" | "reddit" | "supabase";
+export type AppErrorProvider = "openai" | "elevenlabs" | "x" | "reddit" | "supabase";
 
 export type ApiErrorPayload = {
   code: AppErrorCode;
@@ -75,6 +75,9 @@ export const GENERIC_UNAVAILABLE_MESSAGE =
 export const OPENAI_GENERATION_ERROR =
   "We're having trouble generating this broadcast right now. Please try again later.";
 
+export const AUDIO_GENERATION_ERROR =
+  "We're having trouble generating audio right now. Please try again later.";
+
 export const X_FEED_ERROR =
   "We're having trouble tuning into X right now. Please try again later.";
 
@@ -89,6 +92,10 @@ export const SHARE_NOT_FOUND_ERROR = "We couldn't find this broadcast.";
 function getProviderUserMessage(provider: AppErrorProvider) {
   if (provider === "openai") {
     return OPENAI_GENERATION_ERROR;
+  }
+
+  if (provider === "elevenlabs") {
+    return AUDIO_GENERATION_ERROR;
   }
 
   if (provider === "x") {

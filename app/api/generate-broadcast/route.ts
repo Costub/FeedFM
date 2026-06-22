@@ -9,21 +9,20 @@ import {
   getDisabledSourceMessage,
   getGenerationPausedMessage,
 } from "@/lib/config/app-status-types";
-import { AppError, normalizeProviderError } from "@/lib/errors";
+import { AppError, AUDIO_GENERATION_ERROR, normalizeProviderError } from "@/lib/errors";
 import {
   getSourceLabel,
   saveBroadcast,
   sourceModeToXMode,
 } from "@/lib/broadcasts";
 import { generateRadioScript, ScriptGenerationError } from "@/lib/openai-radio";
-import { AudioUnavailableError, generateSpeech } from "@/lib/openai-tts";
+import { AudioUnavailableError, generateSpeech, type GenerateSpeechResult } from "@/lib/tts";
 import { fetchSubredditRssPosts } from "@/lib/reddit-rss";
 import {
   assertRequiredEnv,
   getSetupErrorMessage,
   logServerEvent,
   MissingConfigurationError,
-  OPENAI_GENERATION_ERROR,
   REDDIT_FEED_ERROR,
   SUPABASE_SHARE_ERROR,
   X_FEED_ERROR,
@@ -79,6 +78,8 @@ type TrackingContext = {
   sourceName?: string;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function getBaseUrl(request: Request) {
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
 
@@ -91,8 +92,9 @@ function getBaseUrl(request: Request) {
   return url.origin;
 }
 
-function audioDataUrl(audioBuffer: ArrayBuffer) {
-  return `data:audio/mpeg;base64,${Buffer.from(audioBuffer).toString("base64")}`;
+function audioDataUrl(audioBuffer: ArrayBuffer | Buffer) {
+  const buffer = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
+  return `data:audio/mpeg;base64,${buffer.toString("base64")}`;
 }
 
 function getTrackingErrorCode(error: unknown, fallback = "UNKNOWN") {
@@ -109,6 +111,32 @@ function getTrackingErrorCode(error: unknown, fallback = "UNKNOWN") {
   }
 
   return fallback;
+}
+
+function checkBroadcastLengthRateLimit(request: Request, broadcastLength: string) {
+  if (broadcastLength === "Standard: 2 minutes") {
+    return checkRateLimit({
+      request,
+      name: "generate-broadcast:2-minute",
+      maxRequests: 5,
+      windowMs: DAY_MS,
+      userMessage:
+        "You've reached today's limit of 5 two-minute broadcasts. Try a 60-second broadcast or come back tomorrow.",
+    });
+  }
+
+  if (broadcastLength === "Deep dive: 3 minutes") {
+    return checkRateLimit({
+      request,
+      name: "generate-broadcast:3-minute",
+      maxRequests: 3,
+      windowMs: DAY_MS,
+      userMessage:
+        "You've reached today's limit of 3 three-minute broadcasts. Try a 60-second broadcast or come back tomorrow.",
+    });
+  }
+
+  return null;
 }
 
 function toGeneratedBroadcast({
@@ -376,6 +404,24 @@ export async function POST(request: Request) {
 
     assertRequiredEnv(sourceType);
 
+    const lengthLimited = checkBroadcastLengthRateLimit(request, broadcastLength);
+
+    if (lengthLimited) {
+      await trackEvent({
+        eventName: "generate_failed",
+        sourceType,
+        sourceMode,
+        sourceName,
+        status: "rate_limited",
+        errorCode: "LENGTH_RATE_LIMITED",
+        metadata: {
+          broadcastLength,
+        },
+      });
+
+      return lengthLimited;
+    }
+
     await trackEvent({
       eventName: "generate_started",
       sourceType,
@@ -482,11 +528,11 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    let audioBuffer: ArrayBuffer | undefined;
+    let audioResult: GenerateSpeechResult | undefined;
     let audioMessage: string | undefined;
 
     try {
-      audioBuffer = await generateSpeech({
+      audioResult = await generateSpeech({
         script: script.script,
         tone,
         voiceStyle,
@@ -499,11 +545,13 @@ export async function POST(request: Request) {
         sourceName: feed.sourceName,
         status: "ok",
         metadata: {
-          audioSizeBytes: audioBuffer.byteLength,
+          audioSizeBytes: audioResult.audioBuffer.byteLength,
+          provider: audioResult.provider,
+          model: audioResult.model,
         },
       });
     } catch (error) {
-      audioMessage = OPENAI_GENERATION_ERROR;
+      audioMessage = AUDIO_GENERATION_ERROR;
       await trackEvent({
         eventName: "audio_generation_failed",
         sourceType,
@@ -515,7 +563,7 @@ export async function POST(request: Request) {
 
       if (!(error instanceof AudioUnavailableError)) {
         logServerEvent("provider_error", {
-          provider: "openai",
+          provider: "tts",
           operation: "tts",
           code: error instanceof Error ? error.name : "unknown",
         });
@@ -525,7 +573,7 @@ export async function POST(request: Request) {
     let savedBroadcast: Broadcast | null = null;
     let sharingMessage: string | undefined;
     let shareUrl: string | undefined;
-    let sessionAudioUrl = audioBuffer ? audioDataUrl(audioBuffer) : undefined;
+    let sessionAudioUrl = audioResult ? audioDataUrl(audioResult.audioBuffer) : undefined;
 
     const appStatusBeforeSave = await getAppStatus();
 
@@ -541,34 +589,37 @@ export async function POST(request: Request) {
       });
     } else {
       try {
-      savedBroadcast = await saveBroadcast({
-        script,
-        sourceType,
-        sourceMode,
-        sourceName: feed.sourceName,
-        tone,
-        voiceStyle,
-        broadcastLength,
-        sourceItems: feed.items,
-        audioBuffer,
-      });
-
-      if (savedBroadcast) {
-        shareUrl = `${getBaseUrl(request)}/b/${savedBroadcast.slug}`;
-        sessionAudioUrl = savedBroadcast.audioUrl ?? sessionAudioUrl;
-        await trackEvent({
-          eventName: "broadcast_saved",
+        savedBroadcast = await saveBroadcast({
+          script,
           sourceType,
           sourceMode,
           sourceName: feed.sourceName,
-          broadcastId: savedBroadcast.id,
-          broadcastSlug: savedBroadcast.slug,
-          status: savedBroadcast.storageStatus,
-          metadata: {
-            hasAudio: Boolean(savedBroadcast.audioUrl),
-          },
+          tone,
+          voiceStyle,
+          broadcastLength,
+          sourceItems: feed.items,
+          audioBuffer: audioResult?.audioBuffer,
+          ttsProvider: audioResult?.provider,
+          ttsModel: audioResult?.model,
+          ttsVoiceId: audioResult?.voiceId,
         });
-      }
+
+        if (savedBroadcast) {
+          shareUrl = `${getBaseUrl(request)}/b/${savedBroadcast.slug}`;
+          sessionAudioUrl = savedBroadcast.audioUrl ?? sessionAudioUrl;
+          await trackEvent({
+            eventName: "broadcast_saved",
+            sourceType,
+            sourceMode,
+            sourceName: feed.sourceName,
+            broadcastId: savedBroadcast.id,
+            broadcastSlug: savedBroadcast.slug,
+            status: savedBroadcast.storageStatus,
+            metadata: {
+              hasAudio: Boolean(savedBroadcast.audioUrl),
+            },
+          });
+        }
       } catch (error) {
         sharingMessage = SUPABASE_SHARE_ERROR;
         const appError = normalizeProviderError(error, "supabase");

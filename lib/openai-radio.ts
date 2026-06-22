@@ -53,26 +53,26 @@ function getLengthRange(length: string) {
 
 function getToneBehavior(tone: string) {
   const behaviors: Record<BroadcastTone, string> = {
-    "News anchor": "crisp, clear, informative, professional",
+    "News Anchor": "crisp, clear, informative, professional",
     Funny: "light jokes, playful transitions, but still accurate",
     Dramatic: "high-energy, suspenseful, but not misleading",
-    "Chill late-night FM": "relaxed, warm, smooth, slightly atmospheric",
-    "Tech podcast": "analytical, curious, startup/tech-show style",
+    "Chill Late-Night FM": "relaxed, warm, smooth, slightly atmospheric",
+    "Tech Podcast": "analytical, curious, startup/tech-show style",
   };
 
-  return behaviors[tone as BroadcastTone] ?? behaviors["News anchor"];
+  return behaviors[tone as BroadcastTone] ?? behaviors["News Anchor"];
 }
 
 function getVoiceBehavior(voiceStyle: string) {
   const behaviors: Record<VoiceStyle, string> = {
-    "Classic radio host": "confident, polished, broadcast-style phrasing",
-    "Calm narrator": "slower, clear, explanatory phrasing",
-    "Arcade announcer": "punchier, playful, energetic phrasing",
+    "Classic Radio Host": "confident, polished, broadcast-style phrasing",
+    "Calm Narrator": "slower, clear, explanatory phrasing",
+    "Arcade Announcer": "punchier, playful, energetic phrasing",
     "Cyber DJ": "futuristic, upbeat, internet-culture phrasing",
-    "Late-night host": "warm, conversational, mellow phrasing",
+    "Late-Night FM Host": "warm, conversational, mellow phrasing",
   };
 
-  return behaviors[voiceStyle as VoiceStyle] ?? behaviors["Classic radio host"];
+  return behaviors[voiceStyle as VoiceStyle] ?? behaviors["Classic Radio Host"];
 }
 
 function extractResponseText(data: unknown) {
@@ -226,10 +226,17 @@ function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: Briefi
       ],
       radioWriting: [
         "Write for spoken audio, not for reading.",
-        "Use short sentences.",
+        "Use short spoken sentences.",
+        "Use paragraph breaks between the intro, major themes, and outro.",
+        "Use natural pauses with commas and periods.",
+        "Avoid long dense paragraphs.",
         "Avoid markdown.",
         "Avoid bullet points in the spoken script.",
         "Avoid saying raw URLs.",
+        "Avoid compact date formats like 06/22/26.",
+        "Prefer written-out phrasing for important numbers.",
+        "Avoid complex symbols.",
+        "Avoid too many abbreviations.",
         "Avoid reading usernames unless necessary.",
         "Avoid reading abusive language aloud.",
         "Avoid robotic phrases like 'Post number one says.'",

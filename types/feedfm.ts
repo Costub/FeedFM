@@ -1,16 +1,16 @@
 export type BroadcastTone =
-  | "News anchor"
+  | "News Anchor"
   | "Funny"
   | "Dramatic"
-  | "Chill late-night FM"
-  | "Tech podcast";
+  | "Chill Late-Night FM"
+  | "Tech Podcast";
 
 export type VoiceStyle =
-  | "Classic radio host"
-  | "Calm narrator"
-  | "Arcade announcer"
+  | "Classic Radio Host"
+  | "Calm Narrator"
+  | "Arcade Announcer"
   | "Cyber DJ"
-  | "Late-night host";
+  | "Late-Night FM Host";
 
 export type BroadcastLength =
   | "Quick update: 60 seconds"
@@ -103,6 +103,8 @@ export type GeneratedBroadcast = {
   generatedAt: string;
   audioUrl?: string;
   audioMessage?: string;
+  ttsProvider?: string;
+  ttsModel?: string;
   storageStatus?: BroadcastStorageStatus;
   source?: "rss" | "reddit-rss" | "x-api";
   shareUrl?: string;
@@ -132,6 +134,8 @@ export type Broadcast = {
   audioSizeBytes?: number;
   audioDeletedAt?: string;
   audioDeleteReason?: string;
+  ttsProvider?: string;
+  ttsModel?: string;
   storageStatus: BroadcastStorageStatus;
   sourceItems: FeedItem[];
   shareText?: string;

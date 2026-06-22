@@ -2,74 +2,78 @@ import "server-only";
 
 import {
   AppError,
+  AUDIO_GENERATION_ERROR,
   normalizeProviderError,
-  OPENAI_GENERATION_ERROR,
 } from "@/lib/errors";
 import { logAppError, logServerEvent } from "@/lib/security/env";
 import { timeoutSignal } from "@/lib/security/timeouts";
 import { MAX_TTS_SCRIPT_LENGTH } from "@/lib/security/validation";
+import { AudioUnavailableError, audioErrorFromAppError } from "@/lib/tts/errors";
+import type { GenerateSpeechInput, GenerateSpeechResult } from "@/lib/tts/types";
 import type { BroadcastLength, BroadcastTone, VoiceStyle } from "@/types/feedfm";
 
-type GenerateSpeechInput = {
-  script: string;
-  tone: BroadcastTone | string;
-  voiceStyle: VoiceStyle | string;
-  broadcastLength: BroadcastLength | string;
-};
-
 const voiceByStyle: Record<VoiceStyle, string> = {
-  "Classic radio host": "marin",
-  "Calm narrator": "cedar",
-  "Arcade announcer": "echo",
+  "Classic Radio Host": "marin",
+  "Calm Narrator": "cedar",
+  "Arcade Announcer": "echo",
   "Cyber DJ": "nova",
-  "Late-night host": "onyx",
+  "Late-Night FM Host": "onyx",
 };
 
 const toneInstructions: Record<BroadcastTone, string> = {
-  "News anchor":
+  "News Anchor":
     "Speak like a clear professional radio news anchor. Use confident pacing, crisp articulation, and subtle emphasis on important phrases. Avoid sounding flat.",
   Funny:
     "Speak like a playful radio host. Use lively intonation, light comedic timing, and expressive transitions, while keeping the information clear.",
   Dramatic:
     "Speak like a dramatic FM radio announcer. Use energetic pacing, suspenseful pauses, and heightened emphasis, but do not overact.",
-  "Chill late-night FM":
+  "Chill Late-Night FM":
     "Speak like a relaxed late-night radio host. Use a warm, smooth voice, slower pacing, gentle emphasis, and calm transitions.",
-  "Tech podcast":
+  "Tech Podcast":
     "Speak like an engaging tech podcast host. Use curious, conversational delivery, medium-fast pacing, and emphasize key insights clearly.",
 };
 
 const voiceStyleInstructions: Record<VoiceStyle, string> = {
-  "Classic radio host": "Make it sound polished, charismatic, and broadcast-ready.",
-  "Calm narrator": "Keep the delivery soothing, measured, and easy to follow.",
-  "Arcade announcer":
+  "Classic Radio Host": "Make it sound polished, charismatic, and broadcast-ready.",
+  "Calm Narrator": "Keep the delivery soothing, measured, and easy to follow.",
+  "Arcade Announcer":
     "Add upbeat energy and punchy rhythm, like a retro arcade announcer, but keep it understandable.",
   "Cyber DJ": "Use a futuristic, upbeat delivery with energetic transitions.",
-  "Late-night host": "Make it mellow, intimate, and conversational, like a late-night FM show.",
+  "Late-Night FM Host": "Make it mellow, intimate, and conversational, like a late-night FM show.",
 };
 
-export class AudioUnavailableError extends Error {
-  appError: AppError;
-  status: number;
+const OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
 
-  constructor(appError?: AppError, status = 503) {
-    super(appError?.userMessage ?? OPENAI_GENERATION_ERROR);
-    this.name = "AudioUnavailableError";
-    this.appError =
-      appError ??
-      new AppError({
-        code: "UNKNOWN",
-        provider: "openai",
-        status,
-        userMessage: OPENAI_GENERATION_ERROR,
-        internalMessage: "openai tts unavailable",
-        retryable: true,
-      });
-    this.status = this.appError.status ?? status;
-  }
+const toneAliases: Record<string, BroadcastTone> = {
+  "news anchor": "News Anchor",
+  funny: "Funny",
+  dramatic: "Dramatic",
+  "chill late night fm": "Chill Late-Night FM",
+  "tech podcast": "Tech Podcast",
+};
+
+const voiceAliases: Record<string, VoiceStyle> = {
+  "classic radio host": "Classic Radio Host",
+  "calm narrator": "Calm Narrator",
+  "arcade announcer": "Arcade Announcer",
+  "cyber dj": "Cyber DJ",
+  "late night host": "Late-Night FM Host",
+  "late night fm host": "Late-Night FM Host",
+};
+
+function canonicalTone(tone: BroadcastTone | string): BroadcastTone | undefined {
+  const normalized = tone.toString().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return toneAliases[normalized];
+}
+
+function canonicalVoiceStyle(voiceStyle: VoiceStyle | string): VoiceStyle | undefined {
+  const normalized = voiceStyle.toString().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return voiceAliases[normalized];
 }
 
 export function getVoiceForStyle(voiceStyle: VoiceStyle | string) {
-  return voiceByStyle[voiceStyle as VoiceStyle] ?? "coral";
+  const canonical = canonicalVoiceStyle(voiceStyle);
+  return canonical ? voiceByStyle[canonical] : "coral";
 }
 
 function getLengthPacing(length: string) {
@@ -94,9 +98,8 @@ export function getTtsInstructions({
   broadcastLength: BroadcastLength | string;
 }) {
   return [
-    toneInstructions[tone as BroadcastTone] ?? toneInstructions["News anchor"],
-    voiceStyleInstructions[voiceStyle as VoiceStyle] ??
-      voiceStyleInstructions["Classic radio host"],
+    toneInstructions[canonicalTone(tone) ?? "News Anchor"],
+    voiceStyleInstructions[canonicalVoiceStyle(voiceStyle) ?? "Classic Radio Host"],
     getLengthPacing(broadcastLength.toString()),
   ].join(" ");
 }
@@ -117,7 +120,7 @@ async function requestSpeech({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini-tts",
+      model: OPENAI_TTS_MODEL,
       voice,
       input: script.slice(0, MAX_TTS_SCRIPT_LENGTH),
       instructions,
@@ -140,12 +143,12 @@ async function getAudioProviderErrorCode(response: Response) {
   return code;
 }
 
-export async function generateSpeech({
+export async function generateOpenAISpeech({
   script,
   tone,
   voiceStyle,
   broadcastLength,
-}: GenerateSpeechInput) {
+}: GenerateSpeechInput): Promise<GenerateSpeechResult> {
   if (!process.env.OPENAI_API_KEY) {
     logServerEvent("config_missing", { missing: "OPENAI_API_KEY" });
     throw new AudioUnavailableError(
@@ -153,7 +156,7 @@ export async function generateSpeech({
         code: "CONFIG_MISSING",
         provider: "openai",
         status: 503,
-        userMessage: OPENAI_GENERATION_ERROR,
+        userMessage: AUDIO_GENERATION_ERROR,
         internalMessage: "missing OPENAI_API_KEY",
         retryable: false,
       }),
@@ -168,7 +171,7 @@ export async function generateSpeech({
         code: "INVALID_INPUT",
         provider: "openai",
         status: 400,
-        userMessage: OPENAI_GENERATION_ERROR,
+        userMessage: AUDIO_GENERATION_ERROR,
         internalMessage: "empty tts script",
         retryable: false,
       }),
@@ -178,12 +181,14 @@ export async function generateSpeech({
 
   const instructions = getTtsInstructions({ tone, voiceStyle, broadcastLength });
   const preferredVoice = getVoiceForStyle(voiceStyle);
+  let actualVoice = preferredVoice;
   let response = await requestSpeech({ script: ttsScript, voice: preferredVoice, instructions });
 
   if (!response.ok && preferredVoice !== "coral") {
     const firstCode = await getAudioProviderErrorCode(response);
 
     if (/voice|unsupported|invalid/i.test(firstCode)) {
+      actualVoice = "coral";
       response = await requestSpeech({ script: ttsScript, voice: "coral", instructions });
     } else {
       const appError = normalizeProviderError(
@@ -194,7 +199,7 @@ export async function generateSpeech({
         operation: "tts",
         request_id: response.headers.get("x-request-id") ?? undefined,
       });
-      throw new AudioUnavailableError(appError, response.status);
+      throw audioErrorFromAppError(appError, response.status);
     }
   }
 
@@ -208,8 +213,17 @@ export async function generateSpeech({
       operation: "tts",
       request_id: response.headers.get("x-request-id") ?? undefined,
     });
-    throw new AudioUnavailableError(appError, response.status);
+    throw audioErrorFromAppError(appError, response.status);
   }
 
-  return response.arrayBuffer();
+  return {
+    audioBuffer: Buffer.from(await response.arrayBuffer()),
+    mimeType: "audio/mpeg",
+    provider: "openai",
+    model: OPENAI_TTS_MODEL,
+    voiceId: actualVoice,
+  };
 }
+
+export const generateSpeech = generateOpenAISpeech;
+export { AudioUnavailableError };

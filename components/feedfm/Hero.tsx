@@ -1,10 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Satellite, SlidersHorizontal } from "lucide-react";
+import { Satellite } from "lucide-react";
 
 import { PixelWaveform } from "@/components/feedfm/PixelWaveform";
-import { Button } from "@/components/ui/button";
 
 export function Hero() {
   return (
@@ -23,16 +22,6 @@ export function Hero() {
             FeedFM reads Reddit RSS or X posts for you. Pick a source, choose a voice,
             and listen to the latest signal as an AI-generated radio broadcast.
           </p>
-        </div>
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
-          <Button
-            className="w-full min-w-0 max-w-full sm:w-auto"
-            size="lg"
-            onClick={() => document.getElementById("console")?.scrollIntoView()}
-          >
-            <SlidersHorizontal data-icon="inline-start" />
-            Tune a station
-          </Button>
         </div>
       </motion.div>
 

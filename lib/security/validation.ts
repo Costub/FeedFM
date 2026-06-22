@@ -25,6 +25,27 @@ export const MAX_REDDIT_RSS_ITEMS = 12;
 export const MAX_X_POSTS = 10;
 export const INDEX_SHARED_BROADCASTS = process.env.INDEX_SHARED_BROADCASTS === "true";
 
+const toneAliases: Record<string, BroadcastTone> = {
+  "news anchor": "News Anchor",
+  funny: "Funny",
+  dramatic: "Dramatic",
+  "chill late night fm": "Chill Late-Night FM",
+  "tech podcast": "Tech Podcast",
+};
+
+const voiceStyleAliases: Record<string, VoiceStyle> = {
+  "classic radio host": "Classic Radio Host",
+  "calm narrator": "Calm Narrator",
+  "arcade announcer": "Arcade Announcer",
+  "cyber dj": "Cyber DJ",
+  "late night host": "Late-Night FM Host",
+  "late night fm host": "Late-Night FM Host",
+};
+
+function optionKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 export function parseSourceType(value: unknown): FeedSourceType {
   if (value === undefined || value === null || value === "reddit") {
     return "reddit";
@@ -78,8 +99,16 @@ export function parseTone(value: unknown): BroadcastTone {
     return value as BroadcastTone;
   }
 
+  if (typeof value === "string") {
+    const alias = toneAliases[optionKey(value)];
+
+    if (alias) {
+      return alias;
+    }
+  }
+
   if (value === undefined || value === null) {
-    return "News anchor";
+    return "News Anchor";
   }
 
   throw new UserFacingError("Choose a valid broadcast tone.", 400);
@@ -90,8 +119,16 @@ export function parseVoiceStyle(value: unknown): VoiceStyle {
     return value as VoiceStyle;
   }
 
+  if (typeof value === "string") {
+    const alias = voiceStyleAliases[optionKey(value)];
+
+    if (alias) {
+      return alias;
+    }
+  }
+
   if (value === undefined || value === null) {
-    return "Classic radio host";
+    return "Classic Radio Host";
   }
 
   throw new UserFacingError("Choose a valid voice style.", 400);
@@ -103,7 +140,7 @@ export function parseBroadcastLength(value: unknown): BroadcastLength {
   }
 
   if (value === undefined || value === null) {
-    return "Standard: 2 minutes";
+    return "Quick update: 60 seconds";
   }
 
   throw new UserFacingError("Choose a valid broadcast length.", 400);

@@ -316,20 +316,39 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
                     <span className="font-pixel text-xs uppercase text-amber">{shareStatus}</span>
                   ) : null}
                 </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <Button className="w-full" type="button" variant="secondary" onClick={copyShareLink}>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <Button
+                    className="h-auto min-h-11 w-full min-w-0 whitespace-normal px-3 py-3 text-center text-xs leading-tight sm:text-sm"
+                    type="button"
+                    variant="secondary"
+                    onClick={copyShareLink}
+                  >
                     <Copy data-icon="inline-start" />
                     Copy link
                   </Button>
-                  <Button className="w-full" type="button" variant="outline" onClick={nativeShare}>
+                  <Button
+                    className="h-auto min-h-11 w-full min-w-0 whitespace-normal px-3 py-3 text-center text-xs leading-tight sm:text-sm"
+                    type="button"
+                    variant="outline"
+                    onClick={nativeShare}
+                  >
                     <Share2 data-icon="inline-start" />
                     Native share
                   </Button>
-                  <Button className="w-full" type="button" variant="outline" onClick={shareOnX}>
+                  <Button
+                    className="h-auto min-h-11 w-full min-w-0 whitespace-normal px-3 py-3 text-center text-xs leading-tight sm:text-sm"
+                    type="button"
+                    variant="outline"
+                    onClick={shareOnX}
+                  >
                     <Twitter data-icon="inline-start" />
                     Share on X
                   </Button>
-                  <Button asChild className="w-full" variant="outline">
+                  <Button
+                    asChild
+                    className="h-auto min-h-11 w-full min-w-0 whitespace-normal px-3 py-3 text-center text-xs leading-tight sm:text-sm"
+                    variant="outline"
+                  >
                     <a href={broadcast.shareUrl} target="_blank" rel="noopener noreferrer">
                       <ExternalLink data-icon="inline-start" />
                       Open share page

@@ -1,19 +1,19 @@
 import type { BroadcastLength, BroadcastTone, VoiceStyle } from "@/types/feedfm";
 
 export const tones: BroadcastTone[] = [
-  "News anchor",
+  "News Anchor",
   "Funny",
   "Dramatic",
-  "Chill late-night FM",
-  "Tech podcast",
+  "Chill Late-Night FM",
+  "Tech Podcast",
 ];
 
 export const voiceStyles: VoiceStyle[] = [
-  "Classic radio host",
-  "Calm narrator",
-  "Arcade announcer",
+  "Classic Radio Host",
+  "Calm Narrator",
+  "Arcade Announcer",
   "Cyber DJ",
-  "Late-night host",
+  "Late-Night FM Host",
 ];
 
 export const broadcastLengths: BroadcastLength[] = [

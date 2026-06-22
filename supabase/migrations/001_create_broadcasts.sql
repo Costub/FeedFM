@@ -20,6 +20,9 @@ create table if not exists public.broadcasts (
   audio_size_bytes bigint null,
   audio_deleted_at timestamptz null,
   audio_delete_reason text null,
+  tts_provider text null,
+  tts_model text null,
+  tts_voice_id text null,
   storage_status text not null default 'active',
   source_items jsonb not null default '[]'::jsonb,
   share_text text null,
@@ -44,6 +47,8 @@ create index if not exists broadcasts_slug_idx on public.broadcasts (slug);
 create index if not exists broadcasts_created_at_idx on public.broadcasts (created_at desc);
 create index if not exists broadcasts_source_idx on public.broadcasts (source_type, source_name);
 create index if not exists broadcasts_storage_status_idx on public.broadcasts (storage_status);
+create index if not exists broadcasts_tts_provider_idx on public.broadcasts (tts_provider);
+create index if not exists broadcasts_tts_model_idx on public.broadcasts (tts_model);
 create index if not exists broadcasts_active_audio_created_at_idx
 on public.broadcasts (created_at asc)
 where storage_status = 'active' and audio_storage_path is not null;

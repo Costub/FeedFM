@@ -45,6 +45,9 @@ type BroadcastRow = {
   audio_size_bytes: number | null;
   audio_deleted_at: string | null;
   audio_delete_reason: string | null;
+  tts_provider: string | null;
+  tts_model: string | null;
+  tts_voice_id: string | null;
   storage_status: BroadcastStorageStatus;
   source_items: FeedItem[];
   share_text: string | null;
@@ -80,7 +83,10 @@ export type SaveBroadcastInput = {
   voiceStyle: string;
   broadcastLength: string;
   sourceItems: FeedItem[];
-  audioBuffer?: ArrayBuffer;
+  audioBuffer?: ArrayBuffer | Buffer;
+  ttsProvider?: string;
+  ttsModel?: string;
+  ttsVoiceId?: string;
 };
 
 function truncate(value: string | undefined, maxLength: number) {
@@ -202,6 +208,8 @@ function mapBroadcast(row: BroadcastRow): Broadcast {
     audioSizeBytes: row.audio_size_bytes ?? undefined,
     audioDeletedAt: row.audio_deleted_at ?? undefined,
     audioDeleteReason: row.audio_delete_reason ?? undefined,
+    ttsProvider: row.tts_provider ?? undefined,
+    ttsModel: row.tts_model ?? undefined,
     storageStatus: row.storage_status ?? "save_failed",
     sourceItems: row.source_items ?? [],
     shareText: row.share_text ?? undefined,
@@ -418,7 +426,7 @@ export async function cleanupOldAudioIfNeeded(
   return stats;
 }
 
-export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: ArrayBuffer) {
+export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: ArrayBuffer | Buffer) {
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -533,6 +541,9 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
       audio_url: audioUrl,
       audio_storage_path: audioStoragePath,
       audio_size_bytes: audioSizeBytes,
+      tts_provider: input.ttsProvider,
+      tts_model: input.ttsModel,
+      tts_voice_id: input.ttsVoiceId,
       storage_status: storageStatus,
       source_items: sanitizeSourceItems(input.sourceItems),
       share_text: shareText,

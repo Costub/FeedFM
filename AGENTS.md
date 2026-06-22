@@ -12,9 +12,9 @@ FeedFM is a simple one-page Next.js App Router app that turns public Reddit RSS 
 - Do not scrape Reddit HTML pages or use browser automation for Reddit data.
 - Use only the official X API for X/Twitter sources.
 - Do not scrape X/Twitter HTML pages, use browser automation, or add unofficial X scraping packages.
-- Keep API keys server-side only. Never expose `OPENAI_API_KEY`, `X_BEARER_TOKEN`, or `SUPABASE_SERVICE_ROLE_KEY` with a `NEXT_PUBLIC_` prefix.
+- Keep API keys server-side only. Never expose `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `X_BEARER_TOKEN`, or `SUPABASE_SERVICE_ROLE_KEY` with a `NEXT_PUBLIC_` prefix.
 - Do not add sample-content mode, fake posts, fake X posts, generated sample scripts, or automatic fake-content fallbacks.
-- Missing required env vars or failed Reddit RSS, X API, OpenAI, or Supabase integrations must show real error states.
+- Missing required env vars or failed Reddit RSS, X API, OpenAI, ElevenLabs, or Supabase integrations must show real error states.
 - Supabase is required for production generation and sharing. If saving fails after generation, show the configured share-link failure message.
 - Saved broadcasts are public/unlisted. Do not store sensitive user input or raw API response objects.
 - When source behavior, setup, or env vars change, update both `README.md` and `AGENTS.md`.
@@ -27,7 +27,8 @@ FeedFM is a simple one-page Next.js App Router app that turns public Reddit RSS 
 - shadcn/ui-style components
 - Framer Motion
 - OpenAI Responses API for scripts
-- OpenAI TTS for MP3 audio
+- ElevenLabs Flash/Turbo TTS for MP3 audio by default
+- OpenAI TTS fallback only when `TTS_PROVIDER=auto`
 - `rss-parser` for Reddit RSS
 - Official X API v2 for username timelines and recent keyword search
 - Supabase Postgres for public/unlisted broadcast metadata and transcripts
@@ -49,6 +50,14 @@ Use `.env.local` locally:
 
 ```bash
 OPENAI_API_KEY=
+ELEVENLABS_API_KEY=
+ELEVENLABS_DEFAULT_MODEL=eleven_flash_v2_5
+TTS_PROVIDER=elevenlabs
+ELEVENLABS_VOICE_CLASSIC_RADIO=
+ELEVENLABS_VOICE_CALM_NARRATOR=
+ELEVENLABS_VOICE_ARCADE_ANNOUNCER=
+ELEVENLABS_VOICE_CYBER_DJ=
+ELEVENLABS_VOICE_LATE_NIGHT=
 X_BEARER_TOKEN=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
@@ -60,7 +69,15 @@ ADMIN_STATUS_SECRET=
 INDEX_SHARED_BROADCASTS=false
 ```
 
-`OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are required for generation. `X_BEARER_TOKEN` is required only when X mode should work. Missing required configuration must never fall back to fake content.
+`OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are required for generation. `ELEVENLABS_API_KEY` and all `ELEVENLABS_VOICE_*` IDs are required for ElevenLabs audio when `TTS_PROVIDER=elevenlabs` or `TTS_PROVIDER=auto`. `X_BEARER_TOKEN` is required only when X mode should work. Missing required configuration must never fall back to fake content.
+
+TTS provider behavior:
+
+- `TTS_PROVIDER=elevenlabs` uses ElevenLabs only.
+- `TTS_PROVIDER=openai` uses OpenAI TTS only.
+- `TTS_PROVIDER=auto` tries ElevenLabs first, then falls back to OpenAI TTS if ElevenLabs fails.
+
+Do not hardcode ElevenLabs voice IDs; read them from env vars. Do not expose voice IDs in public UI.
 
 Generated MP3s use Supabase Storage retention. Cleanup may delete old audio objects, but it must never delete broadcast rows, transcripts, summaries, metadata, or source links.
 
