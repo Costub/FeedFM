@@ -1,16 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { RadioReceiver, Satellite, SlidersHorizontal } from "lucide-react";
+import { Satellite, SlidersHorizontal } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { PixelWaveform } from "@/components/feedfm/PixelWaveform";
+import { Button } from "@/components/ui/button";
 
-type HeroProps = {
-  onDemo: () => void;
-};
-
-export function Hero({ onDemo }: HeroProps) {
+export function Hero() {
   return (
     <section className="mx-auto grid w-[min(100%,80rem)] min-w-0 max-w-[100vw] items-center gap-10 overflow-hidden px-5 pb-10 pt-2 sm:px-8 lg:grid-cols-[1fr_0.92fr] lg:pb-16 lg:pt-8">
       <motion.div
@@ -21,11 +17,11 @@ export function Hero({ onDemo }: HeroProps) {
       >
         <div className="flex flex-col gap-5">
           <h1 className="max-w-4xl break-words font-pixel text-[2rem] font-black uppercase leading-[1.12] text-pixel-cream sm:text-5xl lg:text-6xl">
-            Turn any subreddit into a live radio station.
+            Turn the timeline into a live radio station.
           </h1>
           <p className="max-w-full break-words text-lg leading-8 text-muted-foreground sm:max-w-2xl sm:text-xl">
-            FeedFM reads the internet for you. Pick a subreddit, choose a voice,
-            and listen to the latest posts as an AI-generated radio broadcast.
+            FeedFM reads Reddit RSS or X posts for you. Pick a source, choose a voice,
+            and listen to the latest signal as an AI-generated radio broadcast.
           </p>
         </div>
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
@@ -36,15 +32,6 @@ export function Hero({ onDemo }: HeroProps) {
           >
             <SlidersHorizontal data-icon="inline-start" />
             Tune a station
-          </Button>
-          <Button
-            className="w-full min-w-0 max-w-full sm:w-auto"
-            size="lg"
-            variant="outline"
-            onClick={onDemo}
-          >
-            <RadioReceiver data-icon="inline-start" />
-            Try Demo Broadcast
           </Button>
         </div>
       </motion.div>
@@ -63,7 +50,7 @@ export function Hero({ onDemo }: HeroProps) {
           <div>
             <p className="font-pixel text-sm uppercase text-amber">Station 90.1 FM</p>
             <h2 className="mt-2 break-words font-pixel text-2xl font-bold uppercase text-pixel-cream sm:text-3xl">
-              r/startups
+              @paulg
             </h2>
           </div>
           <Satellite className="mt-2 text-signal-green" aria-hidden="true" />

@@ -1,15 +1,30 @@
+import "server-only";
+
+import {
+  AppError,
+  normalizeProviderError,
+  OPENAI_GENERATION_ERROR,
+} from "@/lib/errors";
 import { prepareBroadcastInput } from "@/lib/prepare-broadcast-input";
+import { getContentSafetyReport } from "@/lib/security/content-safety";
+import { logAppError, logServerEvent } from "@/lib/security/env";
+import { timeoutSignal } from "@/lib/security/timeouts";
 import type {
   BroadcastLength,
   BroadcastTone,
   BriefingPost,
+  FeedSourceType,
   RadioScript,
   SourcePost,
   VoiceStyle,
+  XMode,
 } from "@/types/feedfm";
 
 type GenerateRadioScriptInput = {
   subreddit: string;
+  sourceType?: FeedSourceType;
+  sourceName?: string;
+  xMode?: XMode;
   posts: SourcePost[];
   tone: BroadcastTone | string;
   voiceStyle: VoiceStyle | string;
@@ -19,10 +34,10 @@ type GenerateRadioScriptInput = {
 const SCRIPT_MODEL = "gpt-4.1-mini";
 
 const SYSTEM_MESSAGE =
-  "You are FeedFM's radio newsroom editor and host writer. Your job is to turn recent subreddit posts into an accurate, useful, entertaining radio briefing. You must help the listener understand what is going on lately in the subreddit. You may only use the provided posts. Do not invent facts, comments, scores, opinions, or context that is not present. If the posts are thin or unclear, say so naturally.";
+  "You are FeedFM's radio newsroom editor and host writer. Your job is to turn recent feed items into an accurate, useful, entertaining radio briefing. You may only use the provided FeedItem objects. Do not invent facts, comments, scores, opinions, or context that is not present. If the feed is thin, noisy, repetitive, toxic, or unclear, say so naturally. Summarize harmful, abusive, hateful, sexual, or harassing posts neutrally without quoting slurs, threats, explicit sexual details, or abuse. Do not generate harassment, hate, sexual content, instructions for wrongdoing, or operational details for violence or fraud.";
 
 const CORRECTION_MESSAGE =
-  "The previous output failed validation. Rewrite it using only the provided posts. Do not mention comments, scores, or reactions unless present. Do not include raw URLs. Return valid JSON only.";
+  "The previous output failed validation. Rewrite it using only the provided posts. Do not mention comments, likes, reposts, replies, quote counts, scores, or reactions unless present. Do not include raw URLs or markdown. Return valid JSON only.";
 
 function getLengthRange(length: string) {
   if (length.startsWith("Quick")) {
@@ -117,26 +132,87 @@ function buildSchema() {
   };
 }
 
+function getSourceType(input: GenerateRadioScriptInput): FeedSourceType {
+  return input.sourceType ?? "reddit";
+}
+
+function getSourceName(input: GenerateRadioScriptInput) {
+  return input.sourceName ?? input.subreddit;
+}
+
+function getSourceLabel(input: GenerateRadioScriptInput) {
+  if (getSourceType(input) === "x") {
+    return input.xMode === "keyword" ? getSourceName(input) : `@${getSourceName(input).replace(/^@/, "")}`;
+  }
+
+  return `r/${input.subreddit}`;
+}
+
+function getSourceSpecificRules(input: GenerateRadioScriptInput) {
+  const sourceType = getSourceType(input);
+  const sourceName = getSourceName(input);
+
+  if (sourceType === "x" && input.xMode === "username") {
+    return [
+      `The goal is to summarize what @${sourceName.replace(/^@/, "")} has been posting lately.`,
+      "Do not present these posts as broad public consensus.",
+      `Say "recent posts from @${sourceName.replace(/^@/, "")}" or "this account has been focused on..."`,
+      "If the account posts links or short fragments, explain the limitation naturally.",
+      "Do not claim the account is official or verified unless verified data exists in the input.",
+    ];
+  }
+
+  if (sourceType === "x" && input.xMode === "keyword") {
+    return [
+      `The goal is to summarize what people on X are saying about "${sourceName}" lately.`,
+      "Treat the posts as public chatter and discussion, not confirmed news.",
+      "Do not state claims as fact unless clearly supported by an official or source post.",
+      `Use careful phrases such as "The conversation around ${sourceName} is focused on..." and "From this sample of recent posts..."`,
+      "Do not overstate trends from 10 posts.",
+        "Avoid amplifying abuse, harassment, slurs, or misinformation.",
+        "Do not quote abusive or hateful language. Describe it neutrally as abusive language or harassment.",
+        "If posts are noisy or repetitive, mention that as a signal note.",
+    ];
+  }
+
+  return [
+    `Keep the existing subreddit briefing behavior for r/${input.subreddit}.`,
+    `Explain what is going on lately in recent posts in r/${input.subreddit}.`,
+    `Use "recent posts in r/${input.subreddit}".`,
+  ];
+}
+
 function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: BriefingPost[]) {
   const range = getLengthRange(input.broadcastLength.toString());
+  const sourceType = getSourceType(input);
 
   return {
-    subreddit: `r/${input.subreddit}`,
+    sourceType,
+    sourceMode: sourceType === "x" ? input.xMode ?? "username" : "subreddit",
+    sourceName: getSourceName(input),
+    sourceLabel: getSourceLabel(input),
     selectedTone: input.tone,
     selectedVoiceStyle: input.voiceStyle,
     selectedBroadcastLength: input.broadcastLength,
     cleanedBriefingPosts: briefingPosts,
     rules: {
       accuracy: [
-        "Use only the provided RSS posts.",
+        "Use only the provided FeedItem objects.",
         "Do not invent details.",
         "Do not claim something is trending unless multiple posts support it.",
-        "Do not mention comments, upvotes, score, or community reaction unless that data exists in the input.",
+        "Do not mention comments, likes, reposts, replies, quote counts, scores, or reactions unless metrics are present in the input.",
         "If only titles are available, phrase carefully: 'A recent post asks...' or 'One post points to...'",
-        "If the RSS feed lacks context, acknowledge that briefly.",
+        "If the feed lacks context, acknowledge that briefly.",
         "Do not make legal, financial, medical, or safety claims beyond what the posts say.",
         "Avoid overconfident statements.",
+        "Do not read raw URLs aloud.",
+        "Do not include raw JSON.",
+        "Do not include markdown in the spoken script.",
+        "Do not quote slurs, threats, explicit sexual content, or abuse. Use neutral summaries instead.",
+        "Do not provide instructions for wrongdoing, violence, self-harm, fraud, malware, or evading safety systems.",
+        "Mention that source links are available below the player.",
       ],
+      sourceSpecific: getSourceSpecificRules(input),
       briefingQuality: [
         "Start with a quick 'what's happening right now' overview.",
         "Group related posts into themes where possible.",
@@ -155,6 +231,7 @@ function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: Briefi
         "Avoid bullet points in the spoken script.",
         "Avoid saying raw URLs.",
         "Avoid reading usernames unless necessary.",
+        "Avoid reading abusive language aloud.",
         "Avoid robotic phrases like 'Post number one says.'",
         "Use natural radio-host transitions.",
         "Make the selected tone obvious but not cartoonish.",
@@ -163,7 +240,9 @@ function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: Briefi
       toneBehavior: getToneBehavior(input.tone.toString()),
       voiceStyleBehavior: getVoiceBehavior(input.voiceStyle.toString()),
       sourceAttribution:
-        "Use generic attribution such as 'from recent posts in r/{subreddit}'. Do not imply partnership with Reddit.",
+        sourceType === "x"
+          ? "Use generic attribution such as 'from recent posts on X'. Do not imply partnership with X."
+          : "Use generic attribution such as 'from recent posts in r/{subreddit}'. Do not imply partnership with Reddit.",
     },
   };
 }
@@ -173,15 +252,35 @@ type ValidationResult = {
   reasons: string[];
 };
 
+export class ScriptGenerationError extends Error {
+  appError: AppError;
+
+  constructor(appError?: AppError) {
+    super(appError?.userMessage ?? OPENAI_GENERATION_ERROR);
+    this.name = "ScriptGenerationError";
+    this.appError =
+      appError ??
+      new AppError({
+        code: "UNKNOWN",
+        provider: "openai",
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "openai script generation failed",
+        retryable: true,
+      });
+  }
+}
+
 function validateRadioScript(script: RadioScript, briefingPosts: BriefingPost[], length: string) {
   const reasons: string[] = [];
   const range = getLengthRange(length);
   const validIndexes = new Set(briefingPosts.map((post) => post.index));
-  const hasCommentLikeData = false;
+  const hasMetricData = briefingPosts.some((post) =>
+    Object.values(post.metrics ?? {}).some((value) => typeof value === "number"),
+  );
   const rawUrlPattern = /https?:\/\/|www\./i;
   const rawJsonPattern = /```|"\s*:\s*"|\{\s*"|\[\s*\{/;
   const forbiddenReactionPattern =
-    /\baccording to (the )?comments\b|\bcommenters\b|\bupvotes?\b|\bthe community reacts?\b|\breddit users\b/i;
+    /\baccording to (the )?comments\b|\bcommenters\b|\bupvotes?\b|\blikes?\b|\breposts?\b|\bretweets?\b|\breplies\b|\bquotes?\b|\bthe community reacts?\b|\breddit users\b/i;
 
   if (!script.title?.trim()) {
     reasons.push("Missing title.");
@@ -206,8 +305,8 @@ function validateRadioScript(script: RadioScript, briefingPosts: BriefingPost[],
       reasons.push("Script appears to contain raw JSON or code formatting.");
     }
 
-    if (!hasCommentLikeData && forbiddenReactionPattern.test(script.script)) {
-      reasons.push("Script mentions comments, scores, or reactions without source data.");
+    if (!hasMetricData && forbiddenReactionPattern.test(script.script)) {
+      reasons.push("Script mentions comments, scores, social metrics, or reactions without source data.");
     }
   }
 
@@ -283,115 +382,107 @@ async function callOpenAIForScript({
         },
       },
     }),
+    signal: timeoutSignal(30_000),
   });
 
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(
-      data?.error?.message ??
-        "OpenAI could not write the radio script. Try again in a moment.",
-    );
+    const appError = normalizeProviderError({ status: response.status, body: data }, "openai");
+
+    logAppError("provider_error", appError, {
+      operation: "script",
+      request_id: response.headers.get("x-request-id") ?? undefined,
+    });
+    throw new ScriptGenerationError(appError);
   }
 
   const outputText = extractResponseText(data);
 
   if (!outputText) {
-    throw new Error("OpenAI returned an empty script response.");
+    logServerEvent("provider_error", {
+      provider: "openai",
+      operation: "script",
+      code: "empty_response",
+      request_id: response.headers.get("x-request-id") ?? undefined,
+    });
+    throw new ScriptGenerationError(
+      new AppError({
+        code: "PROVIDER_BAD_RESPONSE",
+        provider: "openai",
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "openai script response missing output text",
+        retryable: true,
+      }),
+    );
   }
 
-  return JSON.parse(outputText) as RadioScript;
-}
-
-function inferThemes(posts: BriefingPost[]) {
-  const titles = posts.map((post) => post.title.toLowerCase()).join(" ");
-  const themes = [
-    titles.match(/launch|release|product|feature|startup|mvp/) ? "Launches and product updates" : "",
-    titles.match(/question|how|should|advice|help/) ? "Open questions and advice" : "",
-    titles.match(/debate|argue|versus|vs|drama|controvers/) ? "Debates and tension points" : "",
-    titles.match(/news|update|announc|report/) ? "News and updates" : "",
-    titles.match(/meme|funny|joke/) ? "Memes and lighter chatter" : "",
-  ].filter(Boolean);
-
-  return themes.length >= 2 ? themes.slice(0, 5) : ["Current discussion topics", "Questions worth opening"];
-}
-
-export function generateMockRadioScript({
-  subreddit,
-  posts,
-  tone,
-  voiceStyle,
-  broadcastLength,
-}: GenerateRadioScriptInput): RadioScript {
-  const briefingPosts = prepareBroadcastInput(posts);
-  const selectedPosts = briefingPosts.slice(0, Math.min(6, briefingPosts.length));
-  const station = `r/${subreddit}`;
-  const first = selectedPosts[0];
-  const second = selectedPosts[1];
-  const third = selectedPosts[2];
-  const fourth = selectedPosts[3];
-  const themes = inferThemes(selectedPosts);
-
-  return {
-    title: `${station} Signal Report: ${first?.title ?? "Fresh Feed Check"}`,
-    summary: `FeedFM found ${selectedPosts.length || "a few"} recent posts in ${station}. The signal points to ${themes
-      .slice(0, 2)
-      .join(" and ")
-      .toLowerCase()}, with source links ready below the player.`,
-    mainThemes: themes,
-    script: `You are tuned to FeedFM, broadcasting from recent posts in ${station}. The tone today is ${tone
-      .toString()
-      .toLowerCase()}, with ${voiceStyle.toString().toLowerCase()} energy on the microphone.
-
-Here is what is happening right now. ${
-      first
-        ? `The lead signal is "${first.title}." ${first.excerpt ?? "The RSS feed gives us the title, but not much extra context, so we are keeping this one careful."}`
-        : "The feed is light today, so we are keeping this briefing careful."
-    }
-
-${
-  second
-    ? `Another thread to watch is "${second.title}." ${second.excerpt ?? "It looks like a title-led discussion, which means the source link will matter if you want the full context."}`
-    : ""
-} ${
-      third
-        ? `The third pulse is "${third.title}." ${third.excerpt ?? "It adds another angle to the current conversation."}`
-        : ""
-    }
-
-${
-  fourth
-    ? `Before we sign off, "${fourth.title}" rounds out the board and gives listeners one more place to click for the full story.`
-    : "That is the clearest signal available from this feed right now."
-}
-
-The quick recap: ${themes.join(", ").toLowerCase()}. Source links are available below the player. This is FeedFM, turning the scroll into a signal.`,
-    sourceMap: selectedPosts.map((post) => ({
-      postIndex: post.index,
-      title: post.title,
-      reasonUsed: "Included as part of the clearest recent subreddit signal.",
-    })),
-    qualityNotes: {
-      coverage: `Covers ${selectedPosts.length} recent posts and groups them into the clearest available themes.`,
-      limitations:
-        selectedPosts.some((post) => !post.excerpt) || selectedPosts.length < 4
-          ? "The RSS feed was thin or low-context, so FeedFM focused mostly on post titles."
-          : "This is a demo-safe broadcast generated without live model analysis.",
-    },
-  };
+  try {
+    return JSON.parse(outputText) as RadioScript;
+  } catch {
+    logServerEvent("provider_error", {
+      provider: "openai",
+      operation: "script",
+      code: "invalid_json",
+      request_id: response.headers.get("x-request-id") ?? undefined,
+    });
+    throw new ScriptGenerationError(
+      new AppError({
+        code: "PROVIDER_BAD_RESPONSE",
+        provider: "openai",
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "openai script response invalid json",
+        retryable: true,
+      }),
+    );
+  }
 }
 
 export async function generateRadioScript(
   input: GenerateRadioScriptInput,
 ): Promise<RadioScript> {
+  const safetyReport = getContentSafetyReport(input.posts);
+
+  if (safetyReport.shouldReject) {
+    throw new ScriptGenerationError(
+      new AppError({
+        code: "CONTENT_UNSAFE",
+        provider: "openai",
+        userMessage: "We couldn't generate a safe broadcast from this source right now.",
+        internalMessage: "source content safety rejection",
+        retryable: false,
+      }),
+    );
+  }
+
   const briefingPosts = prepareBroadcastInput(input.posts);
 
   if (!briefingPosts.length) {
-    return generateMockRadioScript(input);
+    throw new ScriptGenerationError(
+      new AppError({
+        code: "PROVIDER_BAD_RESPONSE",
+        provider: getSourceType(input) === "x" ? "x" : "reddit",
+        userMessage:
+          getSourceType(input) === "x"
+            ? "We're having trouble tuning into X right now. Please try again later."
+            : "We couldn't tune into that subreddit right now. Please try another one.",
+        internalMessage: "no readable source posts after preparation",
+        retryable: true,
+      }),
+    );
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return generateMockRadioScript(input);
+    logServerEvent("config_missing", { missing: "OPENAI_API_KEY" });
+    throw new ScriptGenerationError(
+      new AppError({
+        code: "CONFIG_MISSING",
+        provider: "openai",
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "missing OPENAI_API_KEY",
+        retryable: false,
+      }),
+    );
   }
 
   let firstAttempt: RadioScript;
@@ -399,20 +490,13 @@ export async function generateRadioScript(
   try {
     firstAttempt = await callOpenAIForScript({ input, briefingPosts });
   } catch (error) {
-    console.warn(
-      `FeedFM: script generation fallback for r/${input.subreddit}. ${
-        error instanceof Error ? error.message : "Unknown script error."
-      }`,
-    );
+    if (error instanceof ScriptGenerationError) {
+      throw error;
+    }
 
-    return {
-      ...generateMockRadioScript(input),
-      qualityNotes: {
-        coverage: "Uses a safe local script format against the cleaned source posts.",
-        limitations:
-          "OpenAI script generation was unavailable, so FeedFM used transcript mode with a simpler safe script.",
-      },
-    };
+    const appError = normalizeProviderError(error, "openai");
+    logAppError("provider_error", appError, { operation: "script" });
+    throw new ScriptGenerationError(appError);
   }
 
   const firstValidation = validateRadioScript(
@@ -441,23 +525,24 @@ export async function generateRadioScript(
       return correctionAttempt;
     }
 
-    console.warn(
-      `FeedFM: script validation fallback for r/${input.subreddit}. ${correctionValidation.reasons.join(" ")}`,
-    );
+    logServerEvent("script_validation_failed", {
+      reasons: correctionValidation.reasons.length,
+    });
   } catch (error) {
-    console.warn(
-      `FeedFM: script correction fallback for r/${input.subreddit}. ${
-        error instanceof Error ? error.message : "Unknown correction error."
-      }`,
-    );
+    const appError =
+      error instanceof ScriptGenerationError
+        ? error.appError
+        : normalizeProviderError(error, "openai");
+    logAppError("provider_error", appError, { operation: "script_correction" });
   }
 
-  return {
-    ...generateMockRadioScript(input),
-    qualityNotes: {
-      coverage: "Uses a safe local script format against the cleaned source posts.",
-      limitations:
-        "OpenAI output did not pass FeedFM quality checks, so FeedFM used a simpler safe script.",
-    },
-  };
+  throw new ScriptGenerationError(
+    new AppError({
+      code: "PROVIDER_BAD_RESPONSE",
+      provider: "openai",
+      userMessage: OPENAI_GENERATION_ERROR,
+      internalMessage: "openai script validation failed after correction",
+      retryable: true,
+    }),
+  );
 }

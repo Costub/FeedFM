@@ -1,10 +1,12 @@
+import "server-only";
+
 import Parser from "rss-parser";
 
 import {
-  cleanSubredditName as cleanMockSubredditName,
-  getMockPosts as getMockSubredditPosts,
+  cleanSubredditName,
   isValidSubreddit,
-} from "@/lib/mock-data";
+} from "@/lib/feedfm-options";
+import { MAX_REDDIT_RSS_ITEMS } from "@/lib/security/validation";
 import type { SourcePost } from "@/types/feedfm";
 
 type RedditRssSort = "hot" | "new" | "top";
@@ -24,7 +26,7 @@ type RedditRssItem = {
 
 const parser = new Parser<Record<string, unknown>, RedditRssItem>({
   headers: {
-    "User-Agent": "FeedFM/0.1 by personal demo project",
+    "User-Agent": "FeedFM/1.0 by public RSS reader",
     Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
   },
   timeout: 8000,
@@ -72,6 +74,8 @@ function normalizeRssPost(item: RedditRssItem, subreddit: string): SourcePost | 
 
   return {
     id: item.id ?? item.guid ?? url,
+    sourceType: "reddit",
+    sourceName: subreddit,
     subreddit,
     title,
     body: body ? body.slice(0, 700) : undefined,
@@ -79,10 +83,6 @@ function normalizeRssPost(item: RedditRssItem, subreddit: string): SourcePost | 
     url,
     createdAt: item.isoDate ?? item.pubDate,
   };
-}
-
-export function cleanSubredditName(input: string) {
-  return cleanMockSubredditName(input);
 }
 
 export function validateSubredditName(subreddit: string) {
@@ -99,17 +99,13 @@ export function buildRedditRssUrl(subreddit: string, sort: RedditRssSort = "hot"
   return `https://www.reddit.com/r/${cleaned}/${sort}/.rss`;
 }
 
-export function getMockPosts(subreddit: string) {
-  return getMockSubredditPosts(cleanSubredditName(subreddit)).slice(0, 10);
-}
-
 async function parseFeed(url: string, subreddit: string) {
   const feed = await parser.parseURL(url);
 
   return (feed.items ?? [])
     .map((item) => normalizeRssPost(item, subreddit))
     .filter((post): post is SourcePost => Boolean(post))
-    .slice(0, 10);
+    .slice(0, MAX_REDDIT_RSS_ITEMS);
 }
 
 export async function fetchSubredditRssPosts(subreddit: string): Promise<SourcePost[]> {
@@ -140,9 +136,7 @@ export async function fetchSubredditRssPosts(subreddit: string): Promise<SourceP
     }
   }
 
-  console.warn(
-    `FeedFM: Reddit RSS failed for r/${cleaned}. Returning mock posts. ${errors.join(" | ")}`,
+  throw new Error(
+    `Reddit RSS is unavailable for this subreddit. ${errors.join(" | ")}`,
   );
-
-  return getMockPosts(cleaned);
 }

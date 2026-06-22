@@ -1,53 +1,103 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AppStatusBanner } from "@/components/feedfm/AppStatusBanner";
 import { BroadcastConsole } from "@/components/feedfm/BroadcastConsole";
+import { Footer } from "@/components/feedfm/Footer";
 import { Header } from "@/components/feedfm/Header";
 import { Hero } from "@/components/feedfm/Hero";
 import { RadioPlayer } from "@/components/feedfm/RadioPlayer";
+import { trackClientEvent } from "@/lib/analytics/client-events";
+import {
+  DEFAULT_APP_STATUS,
+  getDisabledSourceMessage,
+  getGenerationPausedMessage,
+  type AppStatus,
+} from "@/lib/config/app-status-types";
 import {
   cleanSubredditName,
-  createDemoBroadcast,
+  cleanXUsername,
   isValidSubreddit,
-} from "@/lib/mock-data";
+  isValidXUsername,
+} from "@/lib/feedfm-options";
+import type { ApiErrorPayload, ApiResponse } from "@/lib/errors";
 import type {
   BroadcastLength,
   BroadcastTone,
+  FeedSourceType,
   GeneratedBroadcast,
-  RadioScript,
-  SourcePost,
   VoiceStyle,
+  XMode,
 } from "@/types/feedfm";
 
-const loadingCopy = [
-  "Tuning into r/{subreddit}...",
-  "Reading the latest posts...",
+const sharedLoadingCopy = [
   "Writing the radio script...",
   "Warming up the AI host...",
   "Broadcast ready.",
 ];
 
-export function FeedFMApp() {
+type UiError = ApiErrorPayload;
+
+type FeedFMAppProps = {
+  initialAppStatus?: AppStatus;
+};
+
+export function FeedFMApp({ initialAppStatus = DEFAULT_APP_STATUS }: FeedFMAppProps) {
+  const [sourceType, setSourceType] = useState<FeedSourceType>("reddit");
   const [subreddit, setSubreddit] = useState("startups");
+  const [xMode, setXMode] = useState<XMode>("username");
+  const [xInput, setXInput] = useState("paulg");
   const [tone, setTone] = useState<BroadcastTone>("News anchor");
   const [voiceStyle, setVoiceStyle] = useState<VoiceStyle>("Classic radio host");
   const [length, setLength] = useState<BroadcastLength>("Standard: 2 minutes");
   const [broadcast, setBroadcast] = useState<GeneratedBroadcast | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingStage, setLoadingStage] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<UiError | null>(null);
+  const [appStatus, setAppStatus] = useState<AppStatus>(initialAppStatus);
+  const appStatusRef = useRef(initialAppStatus);
+  const generationInFlight = useRef(false);
   const timeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const audioUrl = useRef<string | null>(null);
+
+  const refreshAppStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/app-status", { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as ApiResponse<AppStatus> | null;
+
+      if (data?.ok) {
+        appStatusRef.current = data.data;
+        setAppStatus(data.data);
+        return data.data;
+      }
+    } catch {
+      setAppStatus((current) => current);
+    }
+
+    return appStatusRef.current;
+  }, []);
 
   useEffect(() => {
+    trackClientEvent({ eventName: "app_loaded" });
+    void refreshAppStatus();
+
     return () => {
-      clearTimers();
-      if (audioUrl.current) {
-        URL.revokeObjectURL(audioUrl.current);
-      }
+      timeouts.current.forEach((timeout) => clearTimeout(timeout));
+      timeouts.current = [];
     };
-  }, []);
+  }, [refreshAppStatus]);
+
+  useEffect(() => {
+    if (sourceType === "reddit" && appStatus.disableReddit && !appStatus.disableX) {
+      setSourceType("x");
+      setError(null);
+    }
+
+    if (sourceType === "x" && appStatus.disableX && !appStatus.disableReddit) {
+      setSourceType("reddit");
+      setError(null);
+    }
+  }, [appStatus.disableReddit, appStatus.disableX, sourceType]);
 
   function clearTimers() {
     timeouts.current.forEach((timeout) => clearTimeout(timeout));
@@ -61,14 +111,6 @@ export function FeedFMApp() {
         block: "start",
       });
     }, 80);
-  }
-
-  function setAudioUrl(url?: string) {
-    if (audioUrl.current) {
-      URL.revokeObjectURL(audioUrl.current);
-    }
-
-    audioUrl.current = url ?? null;
   }
 
   function wait(ms: number) {
@@ -85,155 +127,191 @@ export function FeedFMApp() {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const data = (await response.json().catch(() => null)) as ApiResponse<T> | null;
 
-    if (!response.ok) {
-      throw new Error(data?.error ?? "FeedFM hit a network note that sounded off.");
+    if (!response.ok || !data?.ok) {
+      const errorPayload =
+        data && !data.ok
+          ? data.error
+          : {
+              code: "UNKNOWN" as const,
+              message: "FeedFM could not tune that station. Try another source.",
+            };
+      throw errorPayload;
     }
 
-    return data as T;
+    return data.data;
   }
 
   async function generateBroadcast() {
+    if (generationInFlight.current) {
+      return;
+    }
+
+    const latestStatus = await refreshAppStatus();
+
+    if (latestStatus.maintenanceEnabled || latestStatus.disableGeneration) {
+      setError({
+        code: "PROVIDER_UNAVAILABLE",
+        message: getGenerationPausedMessage(latestStatus),
+      });
+      return;
+    }
+
+    if (sourceType === "reddit" && latestStatus.disableReddit) {
+      setError({
+        code: "PROVIDER_UNAVAILABLE",
+        message: getDisabledSourceMessage("reddit"),
+      });
+      return;
+    }
+
+    if (sourceType === "x" && latestStatus.disableX) {
+      setError({
+        code: "PROVIDER_UNAVAILABLE",
+        message: getDisabledSourceMessage("x"),
+      });
+      return;
+    }
+
+    generationInFlight.current = true;
     clearTimers();
-    const cleaned = cleanSubredditName(subreddit);
-    setSubreddit(cleaned);
+    const cleanedSubreddit = cleanSubredditName(subreddit);
+    const cleanedXInput =
+      xMode === "username" ? cleanXUsername(xInput) : xInput.replace(/\s+/g, " ").trim();
+    const sourceInput = sourceType === "reddit" ? cleanedSubreddit : cleanedXInput;
+    if (sourceType === "reddit") {
+      setSubreddit(cleanedSubreddit);
+    } else {
+      setXInput(cleanedXInput);
+    }
 
-    if (!cleaned) {
-      setError("Enter a subreddit to tune the dial.");
+    if (!sourceInput) {
+      setError({
+        code: "INVALID_INPUT",
+        message: sourceType === "reddit" ? "Enter a subreddit to tune the dial." : "Enter an X source to tune the dial.",
+      });
+      generationInFlight.current = false;
       return;
     }
 
-    if (!isValidSubreddit(cleaned)) {
-      setError("Use letters, numbers, and underscores only.");
+    if (sourceType === "reddit" && !isValidSubreddit(cleanedSubreddit)) {
+      setError({
+        code: "INVALID_INPUT",
+        message: "Use letters, numbers, and underscores only.",
+      });
+      generationInFlight.current = false;
       return;
     }
 
-    setError("");
+    if (sourceType === "x" && xMode === "username" && !isValidXUsername(cleanedXInput)) {
+      setError({
+        code: "INVALID_INPUT",
+        message: "X usernames can use letters, numbers, and underscores, up to 15 characters.",
+      });
+      generationInFlight.current = false;
+      return;
+    }
+
+    if (sourceType === "x" && xMode === "keyword" && cleanedXInput.length < 2) {
+      setError({
+        code: "INVALID_INPUT",
+        message: "Enter at least 2 characters for an X search query.",
+      });
+      generationInFlight.current = false;
+      return;
+    }
+
+    setError(null);
     setIsGenerating(true);
     setBroadcast(null);
-    setAudioUrl();
 
     try {
-      setLoadingStage(loadingCopy[0].replace("{subreddit}", cleaned));
+      setLoadingStage(
+        sourceType === "reddit"
+          ? `Tuning into r/${cleanedSubreddit}...`
+          : xMode === "username"
+            ? `Tuning into @${cleanedXInput}...`
+            : `Scanning X for ${cleanedXInput}...`,
+      );
       await wait(350);
 
-      setLoadingStage(loadingCopy[1]);
-      const reddit = await postJson<{
-        posts: SourcePost[];
-        source: "rss" | "mock";
-        error?: string;
-      }>("/api/reddit", {
-        subreddit: cleaned,
-      });
-
-      setLoadingStage(loadingCopy[2]);
-      const radioScript = await postJson<RadioScript>("/api/generate-script", {
-        subreddit: cleaned,
-        posts: reddit.posts,
+      setLoadingStage(
+        sourceType === "reddit"
+          ? "Reading the latest posts..."
+          : xMode === "username"
+            ? "Reading recent posts..."
+            : "Finding the signal in the timeline...",
+      );
+      await wait(250);
+      setLoadingStage(sharedLoadingCopy[0]);
+      await wait(250);
+      setLoadingStage(sharedLoadingCopy[1]);
+      const generated = await postJson<{
+        broadcast: GeneratedBroadcast;
+        shareUrl?: string;
+        sharingMessage?: string;
+      }>("/api/generate-broadcast", {
+        sourceType,
+        input: sourceInput,
+        sourceMode:
+          sourceType === "reddit"
+            ? "subreddit"
+            : xMode === "username"
+              ? "x_username"
+              : "x_keyword",
+        xMode: sourceType === "x" ? xMode : undefined,
         tone,
         voiceStyle,
         broadcastLength: length,
       });
 
-      setLoadingStage(loadingCopy[3]);
-      let nextAudioUrl: string | undefined;
-      let audioMessage: string | undefined;
-
-      try {
-        const audioResponse = await fetch("/api/generate-audio", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            script: radioScript.script,
-            tone,
-            voiceStyle,
-            broadcastLength: length,
-          }),
-        });
-
-        const contentType = audioResponse.headers.get("Content-Type") ?? "";
-
-        if (audioResponse.ok && contentType.includes("audio/mpeg")) {
-          const blob = await audioResponse.blob();
-          nextAudioUrl = URL.createObjectURL(blob);
-          setAudioUrl(nextAudioUrl);
-        } else {
-          const data = await audioResponse.json().catch(() => null);
-          audioMessage =
-            data?.error ??
-            "Transcript mode is ready. Add an OpenAI API key to enable voice playback.";
-        }
-      } catch {
-        audioMessage =
-          "Transcript mode is ready. Add an OpenAI API key to enable voice playback.";
-      }
-
-      setLoadingStage(loadingCopy[4]);
+      setLoadingStage(sharedLoadingCopy[2]);
       await wait(250);
 
       setBroadcast({
-        id: `${cleaned}-${Date.now()}`,
-        subreddit: cleaned,
-        tone,
-        voiceStyle,
-        length,
-        title: radioScript.title,
-        summary: radioScript.summary,
-        mainThemes: radioScript.mainThemes,
-        transcript: radioScript.script,
-        posts: reddit.posts,
-        sourceMap: radioScript.sourceMap,
-        qualityNotes: radioScript.qualityNotes,
-        generatedAt: new Intl.DateTimeFormat("en", {
-          hour: "numeric",
-          minute: "2-digit",
-        }).format(new Date()),
-        audioUrl: nextAudioUrl,
-        audioMessage,
-        source: reddit.source,
-        sourceMessage: reddit.source === "mock" ? reddit.error : undefined,
-        isDemoMode: reddit.source === "mock",
+        ...generated.broadcast,
+        shareUrl: generated.shareUrl ?? generated.broadcast.shareUrl,
+        sharingMessage:
+          generated.sharingMessage ?? generated.broadcast.sharingMessage,
       });
       scrollToPlayer();
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "FeedFM could not tune that station. Try another subreddit.",
+        typeof caughtError === "object" &&
+          caughtError !== null &&
+          "message" in caughtError &&
+          "code" in caughtError
+          ? (caughtError as UiError)
+          : {
+              code: "UNKNOWN",
+              message:
+                caughtError instanceof Error
+                  ? caughtError.message
+                  : "FeedFM could not tune that station. Try another source.",
+            },
       );
     } finally {
       setIsGenerating(false);
+      generationInFlight.current = false;
     }
-  }
-
-  function showDemo() {
-    clearTimers();
-    setSubreddit("startups");
-    setTone("Chill late-night FM");
-    setVoiceStyle("Classic radio host");
-    setLength("Standard: 2 minutes");
-    setError("");
-    setIsGenerating(false);
-    setLoadingStage("");
-    setAudioUrl();
-    const demo = createDemoBroadcast();
-    setBroadcast({
-      ...demo,
-      audioMessage:
-        "Transcript mode is ready. Add an OpenAI API key to enable voice playback.",
-    });
-    scrollToPlayer();
   }
 
   return (
     <main className="relative min-h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10 console-grid opacity-40" />
       <Header />
-      <Hero onDemo={showDemo} />
+      <Hero />
+      <AppStatusBanner status={appStatus} />
       <BroadcastConsole
+        sourceType={sourceType}
+        setSourceType={setSourceType}
         subreddit={subreddit}
         setSubreddit={setSubreddit}
+        xMode={xMode}
+        setXMode={setXMode}
+        xInput={xInput}
+        setXInput={setXInput}
         tone={tone}
         setTone={setTone}
         voiceStyle={voiceStyle}
@@ -242,9 +320,9 @@ export function FeedFMApp() {
         setLength={setLength}
         error={error}
         isGenerating={isGenerating}
+        appStatus={appStatus}
         loadingStage={loadingStage}
         onGenerate={generateBroadcast}
-        onDemo={showDemo}
       />
       <div id="broadcast-player">
         {broadcast ? (
@@ -252,9 +330,11 @@ export function FeedFMApp() {
             broadcast={broadcast}
             onRegenerate={generateBroadcast}
             isGenerating={isGenerating}
+            sharingDisabled={appStatus.disableSharing}
           />
         ) : null}
       </div>
+      <Footer />
     </main>
   );
 }

@@ -1,6 +1,9 @@
+import "server-only";
+
+import { sanitizeForBroadcast } from "@/lib/security/content-safety";
 import type { BriefingPost, SourcePost } from "@/types/feedfm";
 
-const MAX_POSTS = 12;
+const MAX_POSTS = 10;
 const MAX_EXCERPT_LENGTH = 650;
 
 export function stripHtml(value?: string) {
@@ -17,6 +20,15 @@ export function stripHtml(value?: string) {
 
 function normalizeTitle(title: string) {
   return title.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/https:\/\/t\.co\/\S+/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeUrl(url: string) {
@@ -39,10 +51,11 @@ function trimExcerpt(value?: string) {
 
 export function prepareBroadcastInput(posts: SourcePost[]): BriefingPost[] {
   const seenTitles = new Set<string>();
+  const seenBodies = new Set<string>();
   const seenUrls = new Set<string>();
 
   return posts
-    .filter((post) => post.title?.trim())
+    .filter((post) => post.title?.trim() || post.body?.trim())
     .sort((a, b) => {
       if (!a.createdAt || !b.createdAt) {
         return 0;
@@ -55,7 +68,7 @@ export function prepareBroadcastInput(posts: SourcePost[]): BriefingPost[] {
         return briefingPosts;
       }
 
-      const title = stripHtml(post.title);
+      const title = sanitizeForBroadcast(stripHtml(post.title || post.body || ""));
       const url = post.url?.trim();
 
       if (!title || !url) {
@@ -63,22 +76,27 @@ export function prepareBroadcastInput(posts: SourcePost[]): BriefingPost[] {
       }
 
       const titleKey = normalizeTitle(title);
+      const bodyKey = normalizeText(sanitizeForBroadcast(post.body ?? post.summary ?? title) ?? title);
       const urlKey = normalizeUrl(url);
 
-      if (seenTitles.has(titleKey) || seenUrls.has(urlKey)) {
+      if (seenTitles.has(titleKey) || seenBodies.has(bodyKey) || seenUrls.has(urlKey)) {
         return briefingPosts;
       }
 
       seenTitles.add(titleKey);
+      seenBodies.add(bodyKey);
       seenUrls.add(urlKey);
 
       briefingPosts.push({
         index: briefingPosts.length + 1,
+        sourceType: post.sourceType,
         title,
-        excerpt: trimExcerpt(post.body ?? post.summary),
+        excerpt: trimExcerpt(sanitizeForBroadcast(post.body ?? post.summary)),
         url,
         author: post.author,
+        authorHandle: post.authorHandle,
         createdAt: post.createdAt,
+        metrics: post.metrics,
       });
 
       return briefingPosts;

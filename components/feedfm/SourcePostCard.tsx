@@ -1,15 +1,43 @@
-import { ExternalLink, MessageSquare, RadioTower } from "lucide-react";
+"use client";
 
-import type { SourcePost } from "@/types/feedfm";
+import { ExternalLink, Heart, MessageSquare, RadioTower, Repeat2 } from "lucide-react";
+
+import { trackClientEvent } from "@/lib/analytics/client-events";
+import type { BroadcastSourceMode, SourcePost } from "@/types/feedfm";
 
 type SourcePostCardProps = {
   post: SourcePost;
+  broadcastSlug?: string;
+  sourceMode?: BroadcastSourceMode;
+  sourceName?: string;
   usedInBroadcast?: boolean;
   reasonUsed?: string;
 };
 
-export function SourcePostCard({ post, usedInBroadcast, reasonUsed }: SourcePostCardProps) {
-  const subreddit = post.subreddit ? `r/${post.subreddit}` : "reddit";
+function getUrlHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+export function SourcePostCard({
+  post,
+  broadcastSlug,
+  sourceMode,
+  sourceName,
+  usedInBroadcast,
+  reasonUsed,
+}: SourcePostCardProps) {
+  const sourceLabel =
+    post.sourceType === "x"
+      ? post.authorHandle
+        ? `@${post.authorHandle}`
+        : "X"
+      : post.subreddit
+        ? `r/${post.subreddit}`
+        : "reddit";
   const excerpt = post.body ?? post.summary;
   const publishedDate = post.createdAt
     ? new Intl.DateTimeFormat("en", {
@@ -20,9 +48,9 @@ export function SourcePostCard({ post, usedInBroadcast, reasonUsed }: SourcePost
     : undefined;
 
   return (
-    <article className="pixel-border-sm flex flex-col gap-3 bg-[#171610] p-4">
+    <article className="pixel-border-sm flex min-w-0 flex-col gap-3 bg-[#171610] p-4">
       <div className="flex items-center justify-between gap-3 font-pixel text-xs uppercase text-amber">
-        <span>{subreddit}</span>
+        <span>{sourceLabel}</span>
         {publishedDate ? <span>{publishedDate}</span> : null}
       </div>
       {usedInBroadcast ? (
@@ -31,15 +59,36 @@ export function SourcePostCard({ post, usedInBroadcast, reasonUsed }: SourcePost
         </div>
       ) : null}
       <a
-        className="group text-base font-semibold leading-snug text-pixel-cream hover:text-signal-green"
+        className="group break-words text-base font-semibold leading-snug text-pixel-cream hover:text-signal-green"
         href={post.url}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
+        onClick={() => {
+          trackClientEvent({
+            eventName: "source_link_clicked",
+            broadcastSlug,
+            sourceType: post.sourceType,
+            sourceMode,
+            sourceName: sourceName ?? post.sourceName,
+            metadata: {
+              host: getUrlHost(post.url),
+            },
+          });
+        }}
       >
-        {post.title}
+        {post.sourceType === "x" && post.author ? (
+          <span className="mb-1 block font-pixel text-xs uppercase text-muted-foreground">
+            {post.author} {post.authorHandle ? `@${post.authorHandle}` : ""}
+          </span>
+        ) : null}
+        {post.sourceType === "x" && excerpt
+          ? excerpt.length > 260
+            ? `${excerpt.slice(0, 260)}...`
+            : excerpt
+          : post.title}
         <ExternalLink className="ml-2 inline-block" aria-hidden="true" />
       </a>
-      {excerpt ? (
+      {excerpt && post.sourceType !== "x" ? (
         <p className="text-sm leading-relaxed text-muted-foreground">
           {excerpt.length > 220 ? `${excerpt.slice(0, 220)}...` : excerpt}
         </p>
@@ -50,7 +99,7 @@ export function SourcePostCard({ post, usedInBroadcast, reasonUsed }: SourcePost
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-3 font-pixel text-xs uppercase text-muted-foreground">
-        {post.author ? (
+        {post.sourceType === "reddit" && post.author ? (
           <span className="flex items-center gap-1.5">
             <RadioTower data-icon="inline-start" />
             u/{post.author}
@@ -63,6 +112,24 @@ export function SourcePostCard({ post, usedInBroadcast, reasonUsed }: SourcePost
           <span className="flex items-center gap-1.5">
             <MessageSquare data-icon="inline-start" />
             {post.commentCount.toLocaleString()} comments
+          </span>
+        ) : null}
+        {typeof post.metrics?.likes === "number" ? (
+          <span className="flex items-center gap-1.5">
+            <Heart data-icon="inline-start" />
+            {post.metrics.likes.toLocaleString()} likes
+          </span>
+        ) : null}
+        {typeof post.metrics?.replies === "number" ? (
+          <span className="flex items-center gap-1.5">
+            <MessageSquare data-icon="inline-start" />
+            {post.metrics.replies.toLocaleString()} replies
+          </span>
+        ) : null}
+        {typeof post.metrics?.reposts === "number" ? (
+          <span className="flex items-center gap-1.5">
+            <Repeat2 data-icon="inline-start" />
+            {post.metrics.reposts.toLocaleString()} reposts
           </span>
         ) : null}
       </div>

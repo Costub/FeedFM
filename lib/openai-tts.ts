@@ -1,3 +1,13 @@
+import "server-only";
+
+import {
+  AppError,
+  normalizeProviderError,
+  OPENAI_GENERATION_ERROR,
+} from "@/lib/errors";
+import { logAppError, logServerEvent } from "@/lib/security/env";
+import { timeoutSignal } from "@/lib/security/timeouts";
+import { MAX_TTS_SCRIPT_LENGTH } from "@/lib/security/validation";
 import type { BroadcastLength, BroadcastTone, VoiceStyle } from "@/types/feedfm";
 
 type GenerateSpeechInput = {
@@ -38,12 +48,23 @@ const voiceStyleInstructions: Record<VoiceStyle, string> = {
 };
 
 export class AudioUnavailableError extends Error {
+  appError: AppError;
   status: number;
 
-  constructor(message: string, status = 503) {
-    super(message);
+  constructor(appError?: AppError, status = 503) {
+    super(appError?.userMessage ?? OPENAI_GENERATION_ERROR);
     this.name = "AudioUnavailableError";
-    this.status = status;
+    this.appError =
+      appError ??
+      new AppError({
+        code: "UNKNOWN",
+        provider: "openai",
+        status,
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "openai tts unavailable",
+        retryable: true,
+      });
+    this.status = this.appError.status ?? status;
   }
 }
 
@@ -98,24 +119,25 @@ async function requestSpeech({
     body: JSON.stringify({
       model: "gpt-4o-mini-tts",
       voice,
-      input: script,
+      input: script.slice(0, MAX_TTS_SCRIPT_LENGTH),
       instructions,
       response_format: "mp3",
     }),
+    signal: timeoutSignal(45_000),
   });
 }
 
-async function getAudioErrorMessage(response: Response) {
-  let message = "Audio generation is unavailable right now. Transcript mode is ready.";
+async function getAudioProviderErrorCode(response: Response) {
+  let code = response.status.toString();
 
   try {
     const data = await response.json();
-    message = data?.error?.message ?? message;
+    code = data?.error?.code ?? data?.error?.type ?? code;
   } catch {
     // The audio endpoint may not return JSON for every error shape.
   }
 
-  return message;
+  return code;
 }
 
 export async function generateSpeech({
@@ -125,29 +147,68 @@ export async function generateSpeech({
   broadcastLength,
 }: GenerateSpeechInput) {
   if (!process.env.OPENAI_API_KEY) {
+    logServerEvent("config_missing", { missing: "OPENAI_API_KEY" });
     throw new AudioUnavailableError(
-      "Transcript mode is ready. Add an OpenAI API key to enable voice playback.",
-      200,
+      new AppError({
+        code: "CONFIG_MISSING",
+        provider: "openai",
+        status: 503,
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "missing OPENAI_API_KEY",
+        retryable: false,
+      }),
+    );
+  }
+
+  const ttsScript = script.slice(0, MAX_TTS_SCRIPT_LENGTH).trim();
+
+  if (!ttsScript) {
+    throw new AudioUnavailableError(
+      new AppError({
+        code: "INVALID_INPUT",
+        provider: "openai",
+        status: 400,
+        userMessage: OPENAI_GENERATION_ERROR,
+        internalMessage: "empty tts script",
+        retryable: false,
+      }),
+      400,
     );
   }
 
   const instructions = getTtsInstructions({ tone, voiceStyle, broadcastLength });
   const preferredVoice = getVoiceForStyle(voiceStyle);
-  let response = await requestSpeech({ script, voice: preferredVoice, instructions });
+  let response = await requestSpeech({ script: ttsScript, voice: preferredVoice, instructions });
 
   if (!response.ok && preferredVoice !== "coral") {
-    const firstMessage = await getAudioErrorMessage(response);
+    const firstCode = await getAudioProviderErrorCode(response);
 
-    if (/voice|unsupported|invalid/i.test(firstMessage)) {
-      response = await requestSpeech({ script, voice: "coral", instructions });
+    if (/voice|unsupported|invalid/i.test(firstCode)) {
+      response = await requestSpeech({ script: ttsScript, voice: "coral", instructions });
     } else {
-      throw new AudioUnavailableError(firstMessage, response.status);
+      const appError = normalizeProviderError(
+        { status: response.status, body: { error: { code: firstCode } } },
+        "openai",
+      );
+      logAppError("provider_error", appError, {
+        operation: "tts",
+        request_id: response.headers.get("x-request-id") ?? undefined,
+      });
+      throw new AudioUnavailableError(appError, response.status);
     }
   }
 
   if (!response.ok) {
-    const message = await getAudioErrorMessage(response);
-    throw new AudioUnavailableError(message, response.status);
+    const code = await getAudioProviderErrorCode(response);
+    const appError = normalizeProviderError(
+      { status: response.status, body: { error: { code } } },
+      "openai",
+    );
+    logAppError("provider_error", appError, {
+      operation: "tts",
+      request_id: response.headers.get("x-request-id") ?? undefined,
+    });
+    throw new AudioUnavailableError(appError, response.status);
   }
 
   return response.arrayBuffer();

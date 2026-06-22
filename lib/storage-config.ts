@@ -1,0 +1,5 @@
+import "server-only";
+
+export const FEEDFM_STORAGE_SOFT_LIMIT_BYTES = 800 * 1024 * 1024;
+export const FEEDFM_STORAGE_TARGET_AFTER_CLEANUP_BYTES = 650 * 1024 * 1024;
+export const FEEDFM_MIN_AUDIO_TO_KEEP = 50;

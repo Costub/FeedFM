@@ -4,6 +4,7 @@ node_modules/
 # Next.js
 .next/
 out/
+tsconfig.tsbuildinfo
 
 # production
 build/
@@ -11,6 +12,7 @@ dist/
 
 # environment
 .env
+.env.*
 .env*.local
 !.env.example
 
