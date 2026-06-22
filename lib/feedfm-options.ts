@@ -23,10 +23,9 @@ export const broadcastLengths: BroadcastLength[] = [
 ];
 
 export const subredditChips = [
-  "r/startups",
-  "r/movies",
-  "r/india",
-  "r/technology",
+  "r/nba",
+  "r/anthropic",
+  "r/bangalore",
 ];
 
 export const xChips = ["@paulg", "@OpenAI", "AI agents", "startup funding", "iPhone"];

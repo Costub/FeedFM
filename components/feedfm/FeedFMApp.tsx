@@ -45,9 +45,9 @@ type FeedFMAppProps = {
 
 export function FeedFMApp({ initialAppStatus = DEFAULT_APP_STATUS }: FeedFMAppProps) {
   const [sourceType, setSourceType] = useState<FeedSourceType>("reddit");
-  const [subreddit, setSubreddit] = useState("startups");
+  const [subreddit, setSubreddit] = useState("nba");
   const [xMode, setXMode] = useState<XMode>("username");
-  const [xInput, setXInput] = useState("paulg");
+  const [xInput, setXInput] = useState("costub_");
   const [tone, setTone] = useState<BroadcastTone>("News Anchor");
   const [voiceStyle, setVoiceStyle] = useState<VoiceStyle>("Classic Radio Host");
   const [length, setLength] = useState<BroadcastLength>("Quick update: 60 seconds");
