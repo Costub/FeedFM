@@ -372,9 +372,9 @@ Before promoting to production, run `npm run lint`, `npm run typecheck`, and `np
 ## Current Behavior
 
 - Choose Reddit or X / Twitter as the source.
-- Reddit mode cleans `r/startups` to `startups`.
+- Reddit mode cleans `r/nba` to `nba`.
 - Subreddit names validate against letters, numbers, underscores, and the 21-character subreddit limit.
-- X username mode cleans `@paulg` to `paulg` and validates letters, numbers, underscores, and the 15-character username limit.
+- X username mode cleans `@costub_` to `costub_` and validates letters, numbers, underscores, and the 15-character username limit.
 - X keyword mode trims search text and requires 2 to 120 characters.
 - `Generate Broadcast` fetches recent items from Reddit RSS or the official X API.
 - FeedFM prepares a clean briefing input before asking OpenAI to write the show.

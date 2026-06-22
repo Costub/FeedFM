@@ -28,7 +28,7 @@ export const subredditChips = [
   "r/bangalore",
 ];
 
-export const xChips = ["@paulg", "@OpenAI", "AI agents", "startup funding", "iPhone"];
+export const xChips = ["@costub_", "@OpenAI", "AI agents", "startup funding", "iPhone"];
 
 export function cleanSubredditName(value: string) {
   return value.trim().replace(/^\/?r\//i, "").toLowerCase();

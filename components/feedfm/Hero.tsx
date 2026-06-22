@@ -39,7 +39,7 @@ export function Hero() {
           <div>
             <p className="font-pixel text-sm uppercase text-amber">Station 90.1 FM</p>
             <h2 className="mt-2 break-words font-pixel text-2xl font-bold uppercase text-pixel-cream sm:text-3xl">
-              @paulg
+              @costub_
             </h2>
           </div>
           <Satellite className="mt-2 text-signal-green" aria-hidden="true" />

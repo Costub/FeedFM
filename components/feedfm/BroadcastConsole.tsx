@@ -140,7 +140,7 @@ export function BroadcastConsole({
   const sourceInputLabel =
     sourceType === "reddit" ? "Subreddit" : xMode === "username" ? "X username" : "X search query";
   const sourceInputPlaceholder =
-    sourceType === "reddit" ? "startups" : xMode === "username" ? "paulg" : "openai agents";
+    sourceType === "reddit" ? "nba" : xMode === "username" ? "costub_" : "openai agents";
 
   return (
     <motion.section
