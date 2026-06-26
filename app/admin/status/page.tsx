@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createHash } from "crypto";
 
 import { cookies } from "next/headers";
@@ -97,6 +99,8 @@ async function saveAppStatus(formData: FormData) {
     disableGeneration: checkboxValue(formData, "disableGeneration"),
     disableReddit: checkboxValue(formData, "disableReddit"),
     disableX: checkboxValue(formData, "disableX"),
+    disableXHome: checkboxValue(formData, "disableXHome"),
+    disableAuth: checkboxValue(formData, "disableAuth"),
     disableSharing: checkboxValue(formData, "disableSharing"),
     showBanner: checkboxValue(formData, "showBanner"),
     messageTitle: textValue(formData, "messageTitle", 120),
@@ -273,6 +277,18 @@ function StatusEditor({
               label="Disable X"
               description="Block official X API broadcasts until re-enabled."
               checked={status.disableX}
+            />
+            <Toggle
+              name="disableXHome"
+              label="Disable My X Feed"
+              description="Hide and block personal X home timeline broadcasts."
+              checked={status.disableXHome}
+            />
+            <Toggle
+              name="disableAuth"
+              label="Disable sign-in"
+              description="Hide X sign-in controls and reject new OAuth callbacks."
+              checked={status.disableAuth}
             />
           </div>
 

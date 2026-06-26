@@ -1,3 +1,5 @@
+import "server-only";
+
 import { cleanupOldAudioIfNeeded } from "@/lib/broadcasts";
 import { AppError, normalizeProviderError } from "@/lib/errors";
 import { logServerEvent } from "@/lib/security/env";

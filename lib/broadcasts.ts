@@ -17,6 +17,7 @@ import type {
   BroadcastSourceMapItem,
   BroadcastSourceMode,
   BroadcastStorageStatus,
+  BroadcastVisibility,
   FeedItem,
   FeedSourceType,
   RadioScript,
@@ -24,10 +25,14 @@ import type {
 } from "@/types/feedfm";
 
 export const BROADCAST_AUDIO_BUCKET = "feedfm-broadcast-audio";
+export const PRIVATE_BROADCAST_AUDIO_BUCKET =
+  "feedfm-private-broadcast-audio";
 
 type BroadcastRow = {
   id: string;
-  slug: string;
+  slug: string | null;
+  user_id: string | null;
+  visibility: BroadcastVisibility;
   title: string;
   summary: string;
   script: string;
@@ -41,6 +46,7 @@ type BroadcastRow = {
   voice_style: string;
   broadcast_length: string;
   audio_url: string | null;
+  audio_bucket: string;
   audio_storage_path: string | null;
   audio_size_bytes: number | null;
   audio_deleted_at: string | null;
@@ -57,6 +63,7 @@ type BroadcastRow = {
 
 type BroadcastAudioRecord = {
   id: string;
+  audio_bucket: string;
   audio_storage_path: string | null;
   audio_size_bytes: number | null;
   created_at?: string;
@@ -87,6 +94,8 @@ export type SaveBroadcastInput = {
   ttsProvider?: string;
   ttsModel?: string;
   ttsVoiceId?: string;
+  userId?: string;
+  visibility?: BroadcastVisibility;
 };
 
 function truncate(value: string | undefined, maxLength: number) {
@@ -124,6 +133,10 @@ export function getBroadcastSourceMode(sourceType: FeedSourceType, xMode?: XMode
     return "subreddit";
   }
 
+  if (sourceType === "x_home") {
+    return "x_home";
+  }
+
   return xMode === "keyword" ? "x_keyword" : "x_username";
 }
 
@@ -150,6 +163,10 @@ export function getSourceLabel({
 }) {
   if (sourceType === "reddit") {
     return `r/${sourceName}`;
+  }
+
+  if (sourceType === "x_home" || sourceMode === "x_home") {
+    return sourceName;
   }
 
   if (sourceMode === "x_keyword") {
@@ -190,7 +207,7 @@ function isSafeAudioStoragePath(path: string | null | undefined): path is string
 function mapBroadcast(row: BroadcastRow): Broadcast {
   return {
     id: row.id,
-    slug: row.slug,
+    slug: row.slug ?? undefined,
     title: row.title,
     summary: row.summary,
     script: row.script,
@@ -204,6 +221,7 @@ function mapBroadcast(row: BroadcastRow): Broadcast {
     voiceStyle: row.voice_style,
     broadcastLength: row.broadcast_length,
     audioUrl: row.audio_url ?? undefined,
+    audioBucket: row.audio_bucket,
     audioStoragePath: row.audio_storage_path ?? undefined,
     audioSizeBytes: row.audio_size_bytes ?? undefined,
     audioDeletedAt: row.audio_deleted_at ?? undefined,
@@ -211,6 +229,7 @@ function mapBroadcast(row: BroadcastRow): Broadcast {
     ttsProvider: row.tts_provider ?? undefined,
     ttsModel: row.tts_model ?? undefined,
     storageStatus: row.storage_status ?? "save_failed",
+    visibility: row.visibility ?? "unlisted",
     sourceItems: row.source_items ?? [],
     shareText: row.share_text ?? undefined,
     createdAt: row.created_at,
@@ -226,7 +245,7 @@ export async function getApproxActiveAudioStorageBytes() {
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -252,7 +271,7 @@ async function getActiveAudioCount() {
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -279,7 +298,7 @@ export async function markBroadcastAudioDeleted(broadcastId: string, reason: str
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -305,13 +324,17 @@ export async function deleteBroadcastAudio(broadcast: BroadcastAudioRecord | Bro
   const supabase = getSupabaseAdminClient();
   const storagePath =
     "audio_storage_path" in broadcast ? broadcast.audio_storage_path : broadcast.audioStoragePath;
+  const audioBucket =
+    "audio_bucket" in broadcast
+      ? broadcast.audio_bucket
+      : broadcast.audioBucket ?? BROADCAST_AUDIO_BUCKET;
 
   if (!supabase) {
     throw new AppError({
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -323,7 +346,7 @@ export async function deleteBroadcastAudio(broadcast: BroadcastAudioRecord | Bro
   }
 
   const { error } = await supabase.storage
-    .from(BROADCAST_AUDIO_BUCKET)
+    .from(audioBucket)
     .remove([storagePath]);
 
   if (error) {
@@ -348,7 +371,7 @@ export async function cleanupOldAudioIfNeeded(
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -385,7 +408,7 @@ export async function cleanupOldAudioIfNeeded(
 
   const { data, error } = await supabase
     .from("broadcasts")
-    .select("id,audio_storage_path,audio_size_bytes,created_at")
+    .select("id,audio_bucket,audio_storage_path,audio_size_bytes,created_at")
     .eq("storage_status", "active")
     .not("audio_storage_path", "is", null)
     .order("created_at", { ascending: true })
@@ -426,7 +449,11 @@ export async function cleanupOldAudioIfNeeded(
   return stats;
 }
 
-export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: ArrayBuffer | Buffer) {
+export async function uploadBroadcastAudio(
+  broadcastId: string,
+  mp3Buffer: ArrayBuffer | Buffer,
+  audioBucket = BROADCAST_AUDIO_BUCKET,
+) {
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
@@ -434,7 +461,7 @@ export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: Array
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
@@ -452,7 +479,7 @@ export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: Array
 
   const audioStoragePath = createAudioStoragePath(broadcastId);
   const { error: uploadError } = await supabase.storage
-    .from(BROADCAST_AUDIO_BUCKET)
+    .from(audioBucket)
     .upload(audioStoragePath, mp3Buffer, {
       contentType: "audio/mpeg",
       upsert: false,
@@ -462,25 +489,43 @@ export async function uploadBroadcastAudio(broadcastId: string, mp3Buffer: Array
     throw normalizeProviderError({ status: 500, body: uploadError }, "supabase");
   }
 
-  const publicUrl = supabase.storage
-    .from(BROADCAST_AUDIO_BUCKET)
-    .getPublicUrl(audioStoragePath);
+  let audioUrl: string | undefined;
 
-  if (!publicUrl.data.publicUrl) {
+  if (audioBucket === PRIVATE_BROADCAST_AUDIO_BUCKET) {
+    const { data, error } = await supabase.storage
+      .from(audioBucket)
+      .createSignedUrl(audioStoragePath, 60 * 60);
+
+    if (error || !data.signedUrl) {
+      throw normalizeProviderError(
+        { status: 500, body: error ?? "signed url missing" },
+        "supabase",
+      );
+    }
+
+    audioUrl = data.signedUrl;
+  } else {
+    audioUrl = supabase.storage
+      .from(audioBucket)
+      .getPublicUrl(audioStoragePath).data.publicUrl;
+  }
+
+  if (!audioUrl) {
     throw new AppError({
       code: "STORAGE_UPLOAD_FAILED",
       provider: "supabase",
       status: 500,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
-      internalMessage: "supabase storage public url missing",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
+      internalMessage: "supabase storage audio url missing",
       retryable: true,
     });
   }
 
   return {
-    audioUrl: publicUrl.data.publicUrl,
+    audioUrl,
     audioStoragePath,
     audioSizeBytes,
+    audioBucket,
   };
 }
 
@@ -492,15 +537,20 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
       code: "CONFIG_MISSING",
       provider: "supabase",
       status: 503,
-      userMessage: "Your broadcast was generated, but we couldn't create a share link right now.",
+      userMessage: "The broadcast was generated, but we couldn't create a share link right now.",
       internalMessage: "missing supabase admin client",
       retryable: false,
     });
   }
 
   const id = randomUUID();
-  const slug = createSlug(input.script.title, input.sourceName);
+  const visibility = input.visibility ?? "unlisted";
+  const isPrivate = visibility === "private";
+  const slug = isPrivate ? null : createSlug(input.script.title, input.sourceName);
   const shareText = `Listen to this AI radio briefing from ${getSourceLabel(input)} on FeedFM.`;
+  const audioBucket = isPrivate
+    ? PRIVATE_BROADCAST_AUDIO_BUCKET
+    : BROADCAST_AUDIO_BUCKET;
   let audioUrl: string | undefined;
   let audioStoragePath: string | undefined;
   let audioSizeBytes: number | undefined;
@@ -508,7 +558,7 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
 
   if (input.audioBuffer) {
     try {
-      const audio = await uploadBroadcastAudio(id, input.audioBuffer);
+      const audio = await uploadBroadcastAudio(id, input.audioBuffer, audioBucket);
       audioUrl = audio.audioUrl;
       audioStoragePath = audio.audioStoragePath;
       audioSizeBytes = audio.audioSizeBytes;
@@ -526,6 +576,8 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
     .insert({
       id,
       slug,
+      user_id: input.userId ?? null,
+      visibility,
       title: input.script.title,
       summary: input.script.summary,
       script: input.script.script,
@@ -538,7 +590,8 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
       tone: input.tone,
       voice_style: input.voiceStyle,
       broadcast_length: input.broadcastLength,
-      audio_url: audioUrl,
+      audio_url: isPrivate ? null : audioUrl,
+      audio_bucket: audioBucket,
       audio_storage_path: audioStoragePath,
       audio_size_bytes: audioSizeBytes,
       tts_provider: input.ttsProvider,
@@ -564,7 +617,13 @@ export async function saveBroadcast(input: SaveBroadcastInput) {
     });
   }
 
-  return mapBroadcast(data as BroadcastRow);
+  const broadcast = mapBroadcast(data as BroadcastRow);
+
+  if (isPrivate && audioUrl) {
+    broadcast.audioUrl = audioUrl;
+  }
+
+  return broadcast;
 }
 
 export async function getBroadcastBySlug(slug: string) {
@@ -585,6 +644,7 @@ export async function getBroadcastBySlug(slug: string) {
     .from("broadcasts")
     .select("*")
     .eq("slug", safeSlug)
+    .in("visibility", ["public", "unlisted"])
     .maybeSingle();
 
   if (error) {
@@ -593,6 +653,103 @@ export async function getBroadcastBySlug(slug: string) {
   }
 
   return data ? mapBroadcast(data as BroadcastRow) : null;
+}
+
+export async function sharePrivateBroadcast({
+  broadcastId,
+  userId,
+}: {
+  broadcastId: string;
+  userId: string;
+}) {
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    throw new Error("Supabase service role configuration is missing.");
+  }
+
+  const { data, error } = await supabase
+    .from("broadcasts")
+    .select("*")
+    .eq("id", broadcastId)
+    .eq("user_id", userId)
+    .eq("source_type", "x_home")
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error("Private broadcast not found.");
+  }
+
+  const row = data as BroadcastRow;
+
+  if (row.visibility !== "private" && row.slug) {
+    return mapBroadcast(row);
+  }
+
+  const slug = createSlug(row.title, row.source_name);
+  let audioUrl = row.audio_url;
+  let audioBucket = row.audio_bucket;
+
+  if (
+    row.storage_status === "active" &&
+    row.audio_storage_path &&
+    row.audio_bucket === PRIVATE_BROADCAST_AUDIO_BUCKET
+  ) {
+    const { data: privateAudio, error: downloadError } = await supabase.storage
+      .from(PRIVATE_BROADCAST_AUDIO_BUCKET)
+      .download(row.audio_storage_path);
+
+    if (downloadError || !privateAudio) {
+      throw new Error("Could not prepare private broadcast audio for sharing.");
+    }
+
+    const audioBytes = await privateAudio.arrayBuffer();
+    const { error: uploadError } = await supabase.storage
+      .from(BROADCAST_AUDIO_BUCKET)
+      .upload(row.audio_storage_path, audioBytes, {
+        contentType: "audio/mpeg",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error("Could not create public broadcast audio.");
+    }
+
+    audioUrl = supabase.storage
+      .from(BROADCAST_AUDIO_BUCKET)
+      .getPublicUrl(row.audio_storage_path).data.publicUrl;
+    audioBucket = BROADCAST_AUDIO_BUCKET;
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("broadcasts")
+    .update({
+      slug,
+      visibility: "unlisted",
+      audio_url: audioUrl,
+      audio_bucket: audioBucket,
+      share_text: `Listen to this personal feed radio briefing on FeedFM.`,
+    })
+    .eq("id", broadcastId)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (updateError) {
+    throw new Error("Could not create a public share link.");
+  }
+
+  if (
+    row.audio_bucket === PRIVATE_BROADCAST_AUDIO_BUCKET &&
+    row.audio_storage_path &&
+    audioBucket === BROADCAST_AUDIO_BUCKET
+  ) {
+    await supabase.storage
+      .from(PRIVATE_BROADCAST_AUDIO_BUCKET)
+      .remove([row.audio_storage_path]);
+  }
+
+  return mapBroadcast(updated as BroadcastRow);
 }
 
 export async function incrementBroadcastView(slug: string) {

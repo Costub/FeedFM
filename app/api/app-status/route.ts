@@ -1,3 +1,5 @@
+import "server-only";
+
 import { apiSuccessResponse } from "@/lib/security/http";
 import { getAppStatus } from "@/lib/config/app-status";
 
@@ -11,6 +13,8 @@ export async function GET() {
     disableGeneration: status.disableGeneration,
     disableReddit: status.disableReddit,
     disableX: status.disableX,
+    disableXHome: status.disableXHome,
+    disableAuth: status.disableAuth,
     disableSharing: status.disableSharing,
     showBanner: status.showBanner,
     messageTitle: status.messageTitle,

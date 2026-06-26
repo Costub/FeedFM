@@ -141,6 +141,10 @@ function getSourceName(input: GenerateRadioScriptInput) {
 }
 
 function getSourceLabel(input: GenerateRadioScriptInput) {
+  if (getSourceType(input) === "x_home") {
+    return getSourceName(input);
+  }
+
   if (getSourceType(input) === "x") {
     return input.xMode === "keyword" ? getSourceName(input) : `@${getSourceName(input).replace(/^@/, "")}`;
   }
@@ -151,6 +155,21 @@ function getSourceLabel(input: GenerateRadioScriptInput) {
 function getSourceSpecificRules(input: GenerateRadioScriptInput) {
   const sourceType = getSourceType(input);
   const sourceName = getSourceName(input);
+
+  if (sourceType === "x_home") {
+    return [
+      "The goal is to summarize the user's own X home timeline sample.",
+      `Use careful phrases such as "Your X feed is focused on..." and "From this sample of recent posts..."`,
+      "Treat these as public posts appearing in the user's feed, not as verified facts.",
+      "Do not claim this sample represents all of X or algorithmic For You trends.",
+      "Do not infer the listener's politics, health, religion, sexuality, race, finances, private life, or any other sensitive trait from their feed.",
+      `For sensitive topics, never say "you are interested in..." or otherwise attribute the topic to the listener. Say "your feed includes posts about..." instead.`,
+      "Do not mention private data or imply that the source posts themselves are private.",
+      "Do not overstate trends from at most 10 posts.",
+      "Avoid political, health, or other sensitive profiling.",
+      "If the feed is noisy, repetitive, or low-context, say so in the signal notes.",
+    ];
+  }
 
   if (sourceType === "x" && input.xMode === "username") {
     return [
@@ -188,7 +207,12 @@ function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: Briefi
 
   return {
     sourceType,
-    sourceMode: sourceType === "x" ? input.xMode ?? "username" : "subreddit",
+    sourceMode:
+      sourceType === "x_home"
+        ? "x_home"
+        : sourceType === "x"
+          ? input.xMode ?? "username"
+          : "subreddit",
     sourceName: getSourceName(input),
     sourceLabel: getSourceLabel(input),
     selectedTone: input.tone,
@@ -247,7 +271,7 @@ function buildUserPayload(input: GenerateRadioScriptInput, briefingPosts: Briefi
       toneBehavior: getToneBehavior(input.tone.toString()),
       voiceStyleBehavior: getVoiceBehavior(input.voiceStyle.toString()),
       sourceAttribution:
-        sourceType === "x"
+        sourceType === "x" || sourceType === "x_home"
           ? "Use generic attribution such as 'from recent posts on X'. Do not imply partnership with X."
           : "Use generic attribution such as 'from recent posts in r/{subreddit}'. Do not imply partnership with Reddit.",
     },
@@ -468,9 +492,12 @@ export async function generateRadioScript(
     throw new ScriptGenerationError(
       new AppError({
         code: "PROVIDER_BAD_RESPONSE",
-        provider: getSourceType(input) === "x" ? "x" : "reddit",
+        provider:
+          getSourceType(input) === "x" || getSourceType(input) === "x_home"
+            ? "x"
+            : "reddit",
         userMessage:
-          getSourceType(input) === "x"
+          getSourceType(input) === "x" || getSourceType(input) === "x_home"
             ? "We're having trouble tuning into X right now. Please try again later."
             : "We couldn't tune into that subreddit right now. Please try another one.",
         internalMessage: "no readable source posts after preparation",

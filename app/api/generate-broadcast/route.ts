@@ -1,3 +1,5 @@
+import "server-only";
+
 import { NextResponse } from "next/server";
 
 import { trackEvent } from "@/lib/analytics/track-event";
@@ -44,6 +46,12 @@ import {
   fetchXPostsByKeyword,
   fetchXPostsByUsername,
 } from "@/lib/x-api";
+import { fetchMyXHomeTimeline } from "@/lib/x/home-timeline";
+import { createClient } from "@/lib/supabase/server";
+import {
+  releaseXHomeGeneration,
+  reserveXHomeGeneration,
+} from "@/lib/x-connections";
 import type {
   Broadcast,
   BroadcastSourceMode,
@@ -76,6 +84,8 @@ type TrackingContext = {
   sourceType?: FeedSourceType;
   sourceMode?: BroadcastSourceMode;
   sourceName?: string;
+  userId?: string;
+  xHomeReserved?: boolean;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -177,7 +187,7 @@ function toGeneratedBroadcast({
   const createdAt = savedBroadcast?.createdAt ?? new Date().toISOString();
 
   return {
-    id: savedBroadcast?.slug ?? unsavedId,
+    id: savedBroadcast?.id ?? unsavedId,
     slug: savedBroadcast?.slug,
     sourceType,
     sourceMode,
@@ -208,6 +218,8 @@ function toGeneratedBroadcast({
     sharingMessage,
     createdAt,
     viewCount: savedBroadcast?.viewCount,
+    visibility: savedBroadcast?.visibility,
+    isPersonalFeed: sourceType === "x_home",
   };
 }
 
@@ -322,6 +334,35 @@ async function getXFeed(input: unknown, xMode: XMode): Promise<FeedResult | Next
   }
 }
 
+async function getXHomeFeed(userId: string): Promise<FeedResult | NextResponse> {
+  try {
+    const items = await fetchMyXHomeTimeline({ userId, limit: 10 });
+    const sourceName = items[0]?.sourceName ?? "Your X feed";
+
+    return {
+      items,
+      source: "x-api",
+      sourceName,
+      sourceLabel: sourceName,
+    };
+  } catch (error) {
+    const appError =
+      error instanceof AppError
+        ? error
+        : new AppError({
+            code: "PROVIDER_UNAVAILABLE",
+            provider: "x",
+            status: 502,
+            userMessage:
+              "We’re having trouble tuning into your X feed right now. Please try again later.",
+            internalMessage: "X home timeline fetch failed",
+            retryable: true,
+          });
+
+    return apiErrorResponse(appError, appError.status ?? 502);
+  }
+}
+
 export async function POST(request: Request) {
   const limited = checkRateLimit({
     request,
@@ -348,17 +389,62 @@ export async function POST(request: Request) {
     const sourceName =
       sourceType === "reddit"
         ? parseSubreddit(body.input ?? "")
-        : xMode === "username"
-          ? parseXUsername(body.input ?? "")
-          : parseXKeyword(body.input ?? "");
+        : sourceType === "x_home"
+          ? "My X Feed"
+          : xMode === "username"
+            ? parseXUsername(body.input ?? "")
+            : parseXKeyword(body.input ?? "");
 
     trackingContext.sourceType = sourceType;
     trackingContext.sourceMode = sourceMode;
     trackingContext.sourceName = sourceName;
 
+    if (sourceType === "x_home") {
+      const supabase = await createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType,
+          sourceMode,
+          sourceName,
+          status: "unauthorized",
+          errorCode: "NOT_SIGNED_IN",
+        });
+
+        return apiErrorResponse(
+          new AppError({
+            code: "PROVIDER_AUTH_FAILED",
+            provider: "x",
+            status: 401,
+            userMessage: "Sign in with X to generate your feed broadcast.",
+            internalMessage: "X home generation requested without auth",
+            retryable: false,
+          }),
+          401,
+        );
+      }
+
+      trackingContext.userId = user.id;
+    }
+
     const appStatus = await getAppStatus();
 
     if (appStatus.maintenanceEnabled || appStatus.disableGeneration) {
+      if (sourceType === "x_home") {
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType,
+          sourceMode,
+          sourceName,
+          status: "disabled",
+          errorCode: "GENERATION_DISABLED",
+        });
+      }
+
       await trackEvent({
         eventName: "generate_failed",
         sourceType,
@@ -380,7 +466,23 @@ export async function POST(request: Request) {
       );
     }
 
-    if ((sourceType === "x" && appStatus.disableX) || (sourceType === "reddit" && appStatus.disableReddit)) {
+    if (
+      ((sourceType === "x" || sourceType === "x_home") &&
+        appStatus.disableX) ||
+      (sourceType === "x_home" && appStatus.disableXHome) ||
+      (sourceType === "reddit" && appStatus.disableReddit)
+    ) {
+      if (sourceType === "x_home") {
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType,
+          sourceMode,
+          sourceName,
+          status: "disabled",
+          errorCode: "SOURCE_DISABLED",
+        });
+      }
+
       await trackEvent({
         eventName: "generate_failed",
         sourceType,
@@ -404,9 +506,59 @@ export async function POST(request: Request) {
 
     assertRequiredEnv(sourceType);
 
+    if (sourceType === "x_home" && trackingContext.userId) {
+      const reserved = await reserveXHomeGeneration(trackingContext.userId);
+
+      if (!reserved) {
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType,
+          sourceMode,
+          sourceName,
+          status: "rate_limited",
+          errorCode: "DAILY_LIMIT_REACHED",
+        });
+
+        return apiErrorResponse(
+          new AppError({
+            code: "RATE_LIMITED",
+            provider: "x",
+            status: 429,
+            userMessage:
+              "You’ve reached today’s personal feed broadcast limit. Please try again tomorrow.",
+            internalMessage: "X home daily user generation limit reached",
+            retryable: false,
+          }),
+          429,
+        );
+      }
+
+      await trackEvent({
+        eventName: "x_home_generation_started",
+        sourceType,
+        sourceMode,
+        sourceName,
+        status: "started",
+      });
+      trackingContext.xHomeReserved = true;
+    }
+
     const lengthLimited = checkBroadcastLengthRateLimit(request, broadcastLength);
 
     if (lengthLimited) {
+      if (trackingContext.xHomeReserved && trackingContext.userId) {
+        await releaseXHomeGeneration(trackingContext.userId);
+        trackingContext.xHomeReserved = false;
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType: "x_home",
+          sourceMode: "x_home",
+          sourceName,
+          status: "rate_limited",
+          errorCode: "LENGTH_RATE_LIMITED",
+        });
+      }
+
       await trackEvent({
         eventName: "generate_failed",
         sourceType,
@@ -448,11 +600,13 @@ export async function POST(request: Request) {
         ? await getRedditFeed(body.input ?? "")
         : sourceType === "x"
           ? await getXFeed(body.input ?? "", xMode)
+          : sourceType === "x_home" && trackingContext.userId
+            ? await getXHomeFeed(trackingContext.userId)
           : apiErrorResponse(
               new AppError({
                 code: "INVALID_INPUT",
                 status: 400,
-                userMessage: "Choose Reddit or X as the feed source.",
+                userMessage: "Choose Reddit, X, or My X Feed as the feed source.",
                 internalMessage: "invalid source type",
                 retryable: false,
               }),
@@ -460,6 +614,19 @@ export async function POST(request: Request) {
             );
 
     if (feed instanceof NextResponse) {
+      if (trackingContext.xHomeReserved && trackingContext.userId) {
+        await releaseXHomeGeneration(trackingContext.userId);
+        trackingContext.xHomeReserved = false;
+        await trackEvent({
+          eventName: "x_home_generation_failed",
+          sourceType: "x_home",
+          sourceMode: "x_home",
+          sourceName,
+          status: "failed",
+          errorCode: "FEED_FETCH_FAILED",
+        });
+      }
+
       await trackEvent({
         eventName: "feed_fetch_failed",
         sourceType,
@@ -577,7 +744,7 @@ export async function POST(request: Request) {
 
     const appStatusBeforeSave = await getAppStatus();
 
-    if (appStatusBeforeSave.disableSharing) {
+    if (sourceType !== "x_home" && appStatusBeforeSave.disableSharing) {
       sharingMessage = getSharingDisabledMessage();
       await trackEvent({
         eventName: "broadcast_save_failed",
@@ -602,10 +769,16 @@ export async function POST(request: Request) {
           ttsProvider: audioResult?.provider,
           ttsModel: audioResult?.model,
           ttsVoiceId: audioResult?.voiceId,
+          userId:
+            sourceType === "x_home" ? trackingContext.userId : undefined,
+          visibility: sourceType === "x_home" ? "private" : "unlisted",
         });
 
         if (savedBroadcast) {
-          shareUrl = `${getBaseUrl(request)}/b/${savedBroadcast.slug}`;
+          shareUrl =
+            sourceType === "x_home" || !savedBroadcast.slug
+              ? undefined
+              : `${getBaseUrl(request)}/b/${savedBroadcast.slug}`;
           sessionAudioUrl = savedBroadcast.audioUrl ?? sessionAudioUrl;
           await trackEvent({
             eventName: "broadcast_saved",
@@ -621,7 +794,10 @@ export async function POST(request: Request) {
           });
         }
       } catch (error) {
-        sharingMessage = SUPABASE_SHARE_ERROR;
+        sharingMessage =
+          sourceType === "x_home"
+            ? "Your broadcast was generated, but FeedFM could not save the private copy."
+            : SUPABASE_SHARE_ERROR;
         const appError = normalizeProviderError(error, "supabase");
         await trackEvent({
           eventName: "broadcast_save_failed",
@@ -666,12 +842,32 @@ export async function POST(request: Request) {
       sourceName: feed.sourceName,
       broadcastId: savedBroadcast?.id,
       broadcastSlug: savedBroadcast?.slug,
-      status: appStatusBeforeSave.disableSharing ? "share_disabled" : savedBroadcast ? "ok" : "share_failed",
+      status:
+        sourceType === "x_home"
+          ? savedBroadcast
+            ? "private"
+            : "save_failed"
+          : appStatusBeforeSave.disableSharing
+            ? "share_disabled"
+            : savedBroadcast
+              ? "ok"
+              : "share_failed",
       metadata: {
         hasShareUrl: Boolean(shareUrl),
         hasAudio: Boolean(broadcast.audioUrl),
       },
     });
+
+    if (sourceType === "x_home") {
+      await trackEvent({
+        eventName: "x_home_generation_succeeded",
+        sourceType,
+        sourceMode,
+        sourceName: feed.sourceName,
+        broadcastId: savedBroadcast?.id,
+        status: savedBroadcast ? "ok" : "save_failed",
+      });
+    }
 
     return apiSuccessResponse({
       broadcast,
@@ -679,6 +875,22 @@ export async function POST(request: Request) {
       sharingMessage,
     });
   } catch (error) {
+    if (trackingContext.sourceType === "x_home") {
+      if (trackingContext.xHomeReserved && trackingContext.userId) {
+        await releaseXHomeGeneration(trackingContext.userId);
+        trackingContext.xHomeReserved = false;
+      }
+
+      await trackEvent({
+        eventName: "x_home_generation_failed",
+        sourceType: "x_home",
+        sourceMode: "x_home",
+        sourceName: trackingContext.sourceName,
+        status: "failed",
+        errorCode: getTrackingErrorCode(error),
+      });
+    }
+
     await trackEvent({
       eventName: "generate_failed",
       sourceType: trackingContext.sourceType,

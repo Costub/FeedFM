@@ -20,6 +20,9 @@ export const USAGE_EVENT_NAMES = [
   "share_on_x_clicked",
   "source_link_clicked",
   "maintenance_banner_seen",
+  "x_home_generation_started",
+  "x_home_generation_succeeded",
+  "x_home_generation_failed",
 ] as const;
 
 export type UsageEventName = (typeof USAGE_EVENT_NAMES)[number];
@@ -47,9 +50,14 @@ export function isClientUsageEventName(value: unknown): value is ClientUsageEven
 }
 
 export function isFeedSourceType(value: unknown): value is FeedSourceType {
-  return value === "reddit" || value === "x";
+  return value === "reddit" || value === "x" || value === "x_home";
 }
 
 export function isBroadcastSourceMode(value: unknown): value is BroadcastSourceMode {
-  return value === "subreddit" || value === "x_username" || value === "x_keyword";
+  return (
+    value === "subreddit" ||
+    value === "x_username" ||
+    value === "x_keyword" ||
+    value === "x_home"
+  );
 }

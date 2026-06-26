@@ -69,7 +69,11 @@ export async function isGenerationDisabled() {
 
 export async function isSourceDisabled(sourceType: FeedSourceType) {
   const status = await getAppStatus();
-  return sourceType === "x" ? status.disableX : status.disableReddit;
+  return sourceType === "x_home"
+    ? status.disableX || status.disableXHome
+    : sourceType === "x"
+      ? status.disableX
+      : status.disableReddit;
 }
 
 export async function isSharingDisabled() {

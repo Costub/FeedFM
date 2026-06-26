@@ -49,8 +49,19 @@ type BroadcastConsoleProps = {
   error: ApiErrorPayload | null;
   isGenerating: boolean;
   appStatus: AppStatus;
+  isAuthReady: boolean;
+  isSignedIn: boolean;
+  xConnection: {
+    connected: boolean;
+    xUsername?: string;
+    xDisplayName?: string;
+    scopes?: string[];
+  };
+  authDisabled: boolean;
+  xHomeDisabled: boolean;
   loadingStage: string;
   onGenerate: () => void;
+  onSignInWithX: () => void;
 };
 
 export function BroadcastConsole({
@@ -71,8 +82,14 @@ export function BroadcastConsole({
   error,
   isGenerating,
   appStatus,
+  isAuthReady,
+  isSignedIn,
+  xConnection,
+  authDisabled,
+  xHomeDisabled,
   loadingStage,
   onGenerate,
+  onSignInWithX,
 }: BroadcastConsoleProps) {
   function getErrorTitle() {
     if (!error) {
@@ -123,12 +140,29 @@ export function BroadcastConsole({
     setXInput(chip.replace(/\s+/g, " ").trim());
   }
 
-  const activeChips = sourceType === "reddit" ? subredditChips : xChips;
+  const activeChips =
+    sourceType === "reddit"
+      ? subredditChips
+      : sourceType === "x"
+        ? xChips
+        : [];
   const generationDisabled = appStatus.maintenanceEnabled || appStatus.disableGeneration;
   const currentSourceDisabled =
     sourceType === "reddit" ? appStatus.disableReddit : appStatus.disableX;
   const allSourcesDisabled = appStatus.disableReddit && appStatus.disableX;
-  const submitDisabled = isGenerating || generationDisabled || currentSourceDisabled || allSourcesDisabled;
+  const personalFeedUnavailable =
+    sourceType === "x_home" &&
+    (authDisabled ||
+      xHomeDisabled ||
+      !isAuthReady ||
+      !isSignedIn ||
+      !xConnection.connected);
+  const submitDisabled =
+    isGenerating ||
+    generationDisabled ||
+    currentSourceDisabled ||
+    allSourcesDisabled ||
+    personalFeedUnavailable;
   const statusMessage =
     appStatus.maintenanceEnabled || appStatus.disableGeneration
       ? getGenerationPausedMessage(appStatus)
@@ -183,6 +217,11 @@ export function BroadcastConsole({
                   <SelectItem value="x" disabled={appStatus.disableX}>
                     X / Twitter
                   </SelectItem>
+                  {!xHomeDisabled ? (
+                    <SelectItem value="x_home" disabled={appStatus.disableX}>
+                      My X Feed
+                    </SelectItem>
+                  ) : null}
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -215,29 +254,79 @@ export function BroadcastConsole({
             </label>
           ) : null}
 
-          <label className="flex flex-col gap-2">
-            <span className="font-pixel text-xs uppercase text-amber">{sourceInputLabel}</span>
-            <Input
-              aria-invalid={Boolean(error)}
-              placeholder={sourceInputPlaceholder}
-              value={sourceType === "reddit" ? subreddit : xInput}
-              disabled={isGenerating || currentSourceDisabled || generationDisabled}
-              onChange={(event) => {
-                const nextValue = event.target.value;
+          {sourceType === "x_home" ? (
+            <div className="flex flex-col gap-2 lg:col-span-2">
+              <span className="font-pixel text-xs uppercase text-amber">
+                Personal station
+              </span>
+              <div className="pixel-border-sm flex min-h-11 flex-col justify-center bg-muted px-4 py-3">
+                {xHomeDisabled ? (
+                  <span className="text-sm text-amber">
+                    My X Feed is temporarily unavailable.
+                  </span>
+                ) : authDisabled ? (
+                  <span className="text-sm text-amber">
+                    Sign-in features are temporarily unavailable.
+                  </span>
+                ) : !isAuthReady ? (
+                  <span className="text-sm text-muted-foreground">
+                    Checking your X connection…
+                  </span>
+                ) : isSignedIn && xConnection.connected ? (
+                  <span className="text-sm text-pixel-cream">
+                    Tuning into your X feed as @
+                    {xConnection.xUsername ?? "you"}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-sm leading-relaxed text-pixel-cream">
+                      {isSignedIn
+                        ? "Reconnect X to generate a private radio briefing from your home timeline."
+                        : "Sign in with X to generate a private radio briefing from your home timeline."}
+                    </span>
+                    <Button
+                      className="mt-3 self-start"
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onSignInWithX}
+                    >
+                      {isSignedIn ? "Reconnect X" : "Sign in with X"}
+                    </Button>
+                  </>
+                )}
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  FeedFM will read a small sample of your recent X home
+                  timeline to generate this broadcast. It will not post to your
+                  account.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <label className="flex flex-col gap-2">
+              <span className="font-pixel text-xs uppercase text-amber">{sourceInputLabel}</span>
+              <Input
+                aria-invalid={Boolean(error)}
+                placeholder={sourceInputPlaceholder}
+                value={sourceType === "reddit" ? subreddit : xInput}
+                disabled={isGenerating || currentSourceDisabled || generationDisabled}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
 
-                if (sourceType === "reddit") {
-                  setSubreddit(cleanSubredditName(nextValue));
-                  return;
-                }
+                  if (sourceType === "reddit") {
+                    setSubreddit(cleanSubredditName(nextValue));
+                    return;
+                  }
 
-                setXInput(
-                  xMode === "username"
-                    ? cleanXUsername(nextValue)
-                    : nextValue.replace(/\s+/g, " ").trimStart(),
-                );
-              }}
-            />
-          </label>
+                  setXInput(
+                    xMode === "username"
+                      ? cleanXUsername(nextValue)
+                      : nextValue.replace(/\s+/g, " ").trimStart(),
+                  );
+                }}
+              />
+            </label>
+          )}
 
           <label className="flex flex-col gap-2">
             <span className="font-pixel text-xs uppercase text-amber">Tone</span>
@@ -334,7 +423,11 @@ export function BroadcastConsole({
                 ) : (
                   <Sparkles data-icon="inline-start" />
                 )}
-                {isGenerating ? "Generating..." : "Generate Broadcast"}
+                {isGenerating
+                  ? "Generating..."
+                  : sourceType === "x_home"
+                    ? "Generate My Feed Broadcast"
+                    : "Generate Broadcast"}
               </Button>
             </div>
           </div>

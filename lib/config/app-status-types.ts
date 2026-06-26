@@ -9,6 +9,8 @@ export type AppStatus = {
   disableGeneration: boolean;
   disableReddit: boolean;
   disableX: boolean;
+  disableXHome: boolean;
+  disableAuth: boolean;
   disableSharing: boolean;
   messageTitle: string;
   messageBody: string;
@@ -21,6 +23,8 @@ export const DEFAULT_APP_STATUS: AppStatus = {
   disableGeneration: false,
   disableReddit: false,
   disableX: false,
+  disableXHome: false,
+  disableAuth: false,
   disableSharing: false,
   messageTitle: "",
   messageBody: "",
@@ -50,6 +54,8 @@ export function normalizeAppStatus(value: unknown): AppStatus {
     disableGeneration: record.disableGeneration === true,
     disableReddit: record.disableReddit === true,
     disableX: record.disableX === true,
+    disableXHome: record.disableXHome === true,
+    disableAuth: record.disableAuth === true,
     disableSharing: record.disableSharing === true,
     messageTitle: cleanText(record.messageTitle, 120),
     messageBody: cleanText(record.messageBody, 320),
@@ -59,6 +65,10 @@ export function normalizeAppStatus(value: unknown): AppStatus {
 }
 
 export function getDisabledSourceMessage(sourceType: FeedSourceType) {
+  if (sourceType === "x_home") {
+    return "My X Feed is temporarily unavailable. Please try again later.";
+  }
+
   return sourceType === "x"
     ? "X broadcasts are temporarily unavailable. Please try again later."
     : "Reddit broadcasts are temporarily unavailable. Please try again later.";

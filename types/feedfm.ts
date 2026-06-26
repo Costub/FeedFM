@@ -17,11 +17,17 @@ export type BroadcastLength =
   | "Standard: 2 minutes"
   | "Deep dive: 3 minutes";
 
-export type FeedSourceType = "reddit" | "x";
+export type FeedSourceType = "reddit" | "x" | "x_home";
 
 export type XMode = "username" | "keyword";
 
-export type BroadcastSourceMode = "subreddit" | "x_username" | "x_keyword";
+export type BroadcastSourceMode =
+  | "subreddit"
+  | "x_username"
+  | "x_keyword"
+  | "x_home";
+
+export type BroadcastVisibility = "public" | "private" | "unlisted";
 
 export type BroadcastStorageStatus = "active" | "audio_deleted" | "save_failed";
 
@@ -110,13 +116,15 @@ export type GeneratedBroadcast = {
   shareUrl?: string;
   shareText?: string;
   sharingMessage?: string;
+  visibility?: BroadcastVisibility;
+  isPersonalFeed?: boolean;
   createdAt?: string;
   viewCount?: number;
 };
 
 export type Broadcast = {
   id: string;
-  slug: string;
+  slug?: string;
   title: string;
   summary: string;
   script: string;
@@ -131,12 +139,14 @@ export type Broadcast = {
   broadcastLength: BroadcastLength | string;
   audioUrl?: string;
   audioStoragePath?: string;
+  audioBucket?: string;
   audioSizeBytes?: number;
   audioDeletedAt?: string;
   audioDeleteReason?: string;
   ttsProvider?: string;
   ttsModel?: string;
   storageStatus: BroadcastStorageStatus;
+  visibility: BroadcastVisibility;
   sourceItems: FeedItem[];
   shareText?: string;
   createdAt: string;

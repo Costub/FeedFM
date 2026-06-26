@@ -85,7 +85,7 @@ export const REDDIT_FEED_ERROR =
   "We couldn't tune into that subreddit right now. Please try another one.";
 
 export const SUPABASE_SHARE_ERROR =
-  "Your broadcast was generated, but we couldn't create a share link right now.";
+  "The broadcast was generated, but we couldn't create a share link right now.";
 
 export const SHARE_NOT_FOUND_ERROR = "We couldn't find this broadcast.";
 

@@ -43,6 +43,14 @@ export function getMissingRequiredEnv(sourceType?: FeedSourceType) {
     required.push("X_BEARER_TOKEN");
   }
 
+  if (sourceType === "x_home") {
+    required.push(
+      "TOKEN_ENCRYPTION_SECRET",
+      "X_OAUTH_CLIENT_ID",
+      "X_OAUTH_CLIENT_SECRET",
+    );
+  }
+
   return required.filter((name) => !process.env[name]);
 }
 

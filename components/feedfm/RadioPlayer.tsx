@@ -23,29 +23,44 @@ import type { GeneratedBroadcast } from "@/types/feedfm";
 
 type RadioPlayerProps = {
   broadcast: GeneratedBroadcast;
+  onBroadcastUpdate: (broadcast: GeneratedBroadcast) => void;
   onRegenerate: () => void;
   isGenerating: boolean;
   sharingDisabled: boolean;
 };
 
-export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisabled }: RadioPlayerProps) {
+export function RadioPlayer({
+  broadcast,
+  onBroadcastUpdate,
+  onRegenerate,
+  isGenerating,
+  sharingDisabled,
+}: RadioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioError, setAudioError] = useState("");
   const [shareStatus, setShareStatus] = useState("");
+  const [showShareConfirmation, setShowShareConfirmation] = useState(false);
+  const [isCreatingShareLink, setIsCreatingShareLink] = useState(false);
   const sourceUsageByTitle = new Map(
     broadcast.sourceMap.map((item) => [item.title.toLowerCase().trim(), item.reasonUsed]),
   );
   const hasThinSignalNote = /thin|limited|low-context|mostly on post titles|mostly titles/i.test(
     broadcast.qualityNotes.limitations,
   );
-  const sourceTypeLabel = broadcast.sourceType === "x" ? "X / Twitter" : "Reddit";
+  const sourceTypeLabel =
+    broadcast.sourceType === "x_home"
+      ? "My X Feed"
+      : broadcast.sourceType === "x"
+        ? "X / Twitter"
+        : "Reddit";
   const feedSourceLabel =
     broadcast.source === "reddit-rss"
       ? "reddit rss feed"
       : broadcast.source === "x-api"
         ? "official x api"
         : "live feed";
+  const isPersonalFeed = broadcast.sourceType === "x_home";
 
   useEffect(() => {
     setIsPlaying(false);
@@ -170,14 +185,70 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
     window.open(url.toString(), "_blank", "noopener,noreferrer");
   }
 
+  async function createPersonalShareLink() {
+    setIsCreatingShareLink(true);
+    setShareStatus("");
+
+    try {
+      const response = await fetch(
+        `/api/broadcasts/${encodeURIComponent(broadcast.id)}/share`,
+        { method: "POST" },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            ok: true;
+            data: {
+              slug?: string;
+              shareUrl: string;
+              shareText?: string;
+              audioUrl?: string;
+              visibility?: GeneratedBroadcast["visibility"];
+            };
+          }
+        | {
+            ok: false;
+            error?: { message?: string };
+          }
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          payload && !payload.ok
+            ? payload.error?.message
+            : "The broadcast was generated, but we couldn't create a share link right now.",
+        );
+      }
+
+      onBroadcastUpdate({
+        ...broadcast,
+        slug: payload.data.slug,
+        shareUrl: payload.data.shareUrl,
+        shareText: payload.data.shareText ?? broadcast.shareText,
+        audioUrl: payload.data.audioUrl ?? broadcast.audioUrl,
+        visibility: payload.data.visibility ?? "unlisted",
+      });
+      setShowShareConfirmation(false);
+      setShareStatus("Share link created");
+    } catch (error) {
+      setShareStatus(
+        error instanceof Error
+          ? error.message
+          : "The broadcast was generated, but we couldn't create a share link right now.",
+      );
+    } finally {
+      setIsCreatingShareLink(false);
+    }
+  }
+
   return (
-    <motion.section
-      className="mx-auto w-[min(100%,80rem)] max-w-[100vw] overflow-hidden px-5 pb-20 sm:px-8"
-      initial={{ opacity: 0, y: 24 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
-    >
-      <div className="pixel-border bg-[#11130e] p-5 sm:p-7">
+    <>
+      <motion.section
+        className="mx-auto w-[min(100%,80rem)] max-w-[100vw] overflow-hidden px-5 pb-20 sm:px-8"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+      >
+        <div className="pixel-border bg-[#11130e] p-5 sm:p-7">
         <div className="grid gap-7 lg:grid-cols-[0.92fr_1.08fr]">
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -186,6 +257,11 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
                   <span className="size-3 animate-blink bg-console-black" />
                   ON AIR
                 </div>
+                {isPersonalFeed ? (
+                  <div className="pixel-border-sm bg-amber px-3 py-2 font-pixel text-xs font-bold uppercase text-console-black">
+                    Personal feed broadcast
+                  </div>
+                ) : null}
               </div>
               <span className="font-pixel text-xs uppercase text-muted-foreground">
                 generated {broadcast.generatedAt}
@@ -204,6 +280,11 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                     {broadcast.summary}
                   </p>
+                  {isPersonalFeed ? (
+                    <p className="mt-3 border-l-2 border-amber pl-3 text-xs leading-relaxed text-amber">
+                      This broadcast is based on your X home timeline sample.
+                    </p>
+                  ) : null}
                   {broadcast.mainThemes.length ? (
                     <div className="mt-4 flex flex-wrap gap-2">
                       {broadcast.mainThemes.map((theme) => (
@@ -356,6 +437,33 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
                   </Button>
                 </div>
               </div>
+            ) : isPersonalFeed && broadcast.visibility === "private" ? (
+              <div className="pixel-border-sm bg-[#171610] p-4">
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <div>
+                    <p className="font-pixel text-sm uppercase text-amber">
+                      Private by default
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                      This personal feed broadcast has no public link.
+                    </p>
+                  </div>
+                  {shareStatus ? (
+                    <span className="font-pixel text-xs uppercase text-coral">
+                      {shareStatus}
+                    </span>
+                  ) : null}
+                </div>
+                <Button
+                  className="mt-4"
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowShareConfirmation(true)}
+                >
+                  <Share2 data-icon="inline-start" />
+                  Create share link
+                </Button>
+              </div>
             ) : broadcast.sharingMessage ? (
               <div className="pixel-border-sm bg-[#211d14] p-4">
                 <p className="font-pixel text-xs uppercase text-amber">Share link unavailable</p>
@@ -451,7 +559,57 @@ export function RadioPlayer({ broadcast, onRegenerate, isGenerating, sharingDisa
             })}
           </div>
         </div>
-      </div>
-    </motion.section>
+        </div>
+      </motion.section>
+      {showShareConfirmation ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"
+          role="presentation"
+        >
+          <div
+            aria-describedby="personal-share-description"
+            aria-labelledby="personal-share-title"
+            aria-modal="true"
+            className="pixel-border max-w-lg bg-[#11130e] p-6"
+            role="dialog"
+          >
+            <h2
+              id="personal-share-title"
+              className="font-pixel text-2xl font-black uppercase text-pixel-cream"
+            >
+              Share personal feed broadcast?
+            </h2>
+            <p
+              id="personal-share-description"
+              className="mt-4 text-sm leading-relaxed text-muted-foreground"
+            >
+              This broadcast is based on your X home timeline. If you create a
+              share link, anyone with the link can listen and read the
+              transcript. Shared broadcasts are public to anyone with the
+              link.
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={isCreatingShareLink}
+                onClick={() => setShowShareConfirmation(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={isCreatingShareLink}
+                onClick={createPersonalShareLink}
+              >
+                {isCreatingShareLink
+                  ? "Creating…"
+                  : "Create public share link"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

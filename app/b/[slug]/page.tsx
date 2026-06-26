@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarDays, Eye, Radio, Volume2 } from "lucide-react";

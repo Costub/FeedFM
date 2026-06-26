@@ -55,7 +55,11 @@ export function parseSourceType(value: unknown): FeedSourceType {
     return "x";
   }
 
-  throw new UserFacingError("Choose Reddit or X as the feed source.", 400);
+  if (value === "x_home") {
+    return "x_home";
+  }
+
+  throw new UserFacingError("Choose Reddit, X, or My X Feed as the feed source.", 400);
 }
 
 export function parseXMode(value: unknown): XMode {
@@ -71,7 +75,14 @@ export function parseXMode(value: unknown): XMode {
 }
 
 export function parseSourceMode(value: unknown, sourceType: FeedSourceType, xMode: XMode): BroadcastSourceMode {
-  const defaultSourceMode = sourceType === "reddit" ? "subreddit" : xMode === "keyword" ? "x_keyword" : "x_username";
+  const defaultSourceMode =
+    sourceType === "reddit"
+      ? "subreddit"
+      : sourceType === "x_home"
+        ? "x_home"
+        : xMode === "keyword"
+          ? "x_keyword"
+          : "x_username";
 
   if (value === undefined || value === null) {
     return defaultSourceMode;
@@ -89,6 +100,10 @@ export function parseSourceMode(value: unknown, sourceType: FeedSourceType, xMod
     if (value === "x_keyword" && xMode === "keyword") {
       return value;
     }
+  }
+
+  if (sourceType === "x_home" && value === "x_home") {
+    return value;
   }
 
   throw new UserFacingError("The source mode does not match the selected feed source.", 400);

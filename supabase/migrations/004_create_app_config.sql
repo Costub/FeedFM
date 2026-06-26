@@ -16,6 +16,8 @@ values (
     "disableGeneration": false,
     "disableReddit": false,
     "disableX": false,
+    "disableXHome": false,
+    "disableAuth": false,
     "disableSharing": false,
     "messageTitle": "",
     "messageBody": "",

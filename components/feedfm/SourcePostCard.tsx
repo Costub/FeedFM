@@ -31,7 +31,7 @@ export function SourcePostCard({
   reasonUsed,
 }: SourcePostCardProps) {
   const sourceLabel =
-    post.sourceType === "x"
+    post.sourceType === "x" || post.sourceType === "x_home"
       ? post.authorHandle
         ? `@${post.authorHandle}`
         : "X"
@@ -76,19 +76,19 @@ export function SourcePostCard({
           });
         }}
       >
-        {post.sourceType === "x" && post.author ? (
+        {(post.sourceType === "x" || post.sourceType === "x_home") && post.author ? (
           <span className="mb-1 block font-pixel text-xs uppercase text-muted-foreground">
             {post.author} {post.authorHandle ? `@${post.authorHandle}` : ""}
           </span>
         ) : null}
-        {post.sourceType === "x" && excerpt
+        {(post.sourceType === "x" || post.sourceType === "x_home") && excerpt
           ? excerpt.length > 260
             ? `${excerpt.slice(0, 260)}...`
             : excerpt
           : post.title}
         <ExternalLink className="ml-2 inline-block" aria-hidden="true" />
       </a>
-      {excerpt && post.sourceType !== "x" ? (
+      {excerpt && post.sourceType === "reddit" ? (
         <p className="text-sm leading-relaxed text-muted-foreground">
           {excerpt.length > 220 ? `${excerpt.slice(0, 220)}...` : excerpt}
         </p>
